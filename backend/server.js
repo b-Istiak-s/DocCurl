@@ -2,13 +2,20 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const MarkdownIt = require("markdown-it");
+const setupCurlRoutes = require("./curl-runner");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const md = new MarkdownIt();
 
+// Middleware
+app.use(express.json({ limit: "10kb" }));
+
 // Serve static files from the frontend directory
 app.use(express.static(path.join(__dirname, "../frontend")));
+
+// Setup curl routes
+setupCurlRoutes(app);
 
 // API endpoint to get list of markdown files
 app.get("/api/docs", (req, res) => {

@@ -91,16 +91,73 @@ function curlFetcher() {
 async function runCurlCommand(curlCommand, outputElement) {
   try {
     outputElement.innerHTML = '<div class="outputEmpty">Running...</div>';
+
+    // Parse curl command to extract URL and method
+    const urlMatch = curlCommand.match(/curl\s+(?:-[A-Za-z]\s+\S+\s+)*(\S+)/);
+    const methodMatch = curlCommand.match(
+      /-X\s+(GET|POST|PUT|PATCH|DELETE|HEAD)/i,
+    );
+
+    if (!urlMatch) {
+      const preElement = document.createElement("pre");
+      preElement.textContent = "Error: Could not parse URL from curl command";
+      outputElement.innerHTML = "";
+      outputElement.appendChild(preElement);
+      return;
+    }
+
+    const url = urlMatch[1];
+    const method = methodMatch ? methodMatch[1].toUpperCase() : "GET";
+
+    // Parse headers from -H flags
+    const headers = {};
+    const headerMatches = curlCommand.matchAll(/-H\s+["']([^"']+)["']/g);
+    for (const match of headerMatches) {
+      const [key, ...valueParts] = match[1].split(":");
+      if (key && valueParts.length > 0) {
+        headers[key.trim()] = valueParts.join(":").trim();
+      }
+    }
+
+    // Parse body from -d or --data flags
+    let body = "";
+    const bodyMatch = curlCommand.match(/(?:-d|--data)\s+["']([^"']+)["']/);
+    if (bodyMatch) {
+      body = bodyMatch[1];
+    }
+
     // Execute curl command via backend API
-    const response = await fetch("/api/curl", {
+    const response = await fetch("/api/run-curl", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command: curlCommand }),
+      body: JSON.stringify({ url, method, headers, body }),
     });
+
     const data = await response.json();
-    outputElement.innerHTML = `<pre>${data.output}</pre>`;
+
+    if (data.success) {
+      const preElement = document.createElement("pre");
+      // Try to prettify if it's JSON
+      try {
+        const parsed = JSON.parse(data.output);
+        preElement.textContent = JSON.stringify(parsed, null, 2);
+      } catch {
+        // Not JSON, show as plain text
+        preElement.textContent = data.output;
+      }
+      outputElement.innerHTML = "";
+      outputElement.appendChild(preElement);
+    } else {
+      const preElement = document.createElement("pre");
+      preElement.textContent = `Error: ${data.error || data.details || "Request failed"}`;
+      outputElement.innerHTML = "";
+      outputElement.appendChild(preElement);
+    }
   } catch (error) {
-    outputElement.innerHTML = `<pre>Error: ${error.message}</pre>`;
+    const preElement = document.createElement("pre");
+    preElement.textContent = `Error: ${error.message}`;
+    outputElement.innerHTML = "";
+    outputElement.appendChild(preElement);
     console.error("Error running curl:", error);
   }
 }
