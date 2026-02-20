@@ -81,6 +81,7 @@ body {
 }
 
 .curlPlaygroundInline {
+  position: relative;
   display: flex;
   gap: 1px;
   background-color: #ddd;
@@ -89,9 +90,13 @@ body {
   border-radius: 0;
   overflow: hidden;
   width: calc(100vw - 250px);
+  max-height: 300px;
+  min-height: 200px;
+  resize: vertical;
 }
 
 .curlPlaygroundInline > div {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -116,8 +121,10 @@ body {
 }
 
 .curlPlaygroundInline .runBtn {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
   padding: 8px 16px;
-  margin: 8px 16px 12px auto;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;

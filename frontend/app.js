@@ -137,27 +137,67 @@ async function runCurlCommand(curlCommand, outputElement) {
 
     if (data.success) {
       const preElement = document.createElement("pre");
-      // Try to prettify if it's JSON
+      const codeElement = document.createElement("code");
+
+      // Detect content type and apply appropriate syntax highlighting
+      let detectedLanguage = "plaintext";
+      const output = data.output.trim();
+
+      // Try JSON first
       try {
-        const parsed = JSON.parse(data.output);
-        preElement.textContent = JSON.stringify(parsed, null, 2);
+        const parsed = JSON.parse(output);
+        codeElement.textContent = JSON.stringify(parsed, null, 2);
+        detectedLanguage = "json";
       } catch {
-        // Not JSON, show as plain text
-        preElement.textContent = data.output;
+        // Check for HTML/XML
+        if (
+          output.match(/^\s*<(!DOCTYPE\s+html|html|!--)/i) ||
+          output.match(/<\/\w+>\s*$/)
+        ) {
+          detectedLanguage = "html";
+          codeElement.textContent = output;
+        }
+        // Check for XML
+        else if (
+          output.match(/^\s*<\?xml/i) ||
+          (output.match(/^\s*</) && !output.includes("<!DOCTYPE html"))
+        ) {
+          detectedLanguage = "xml";
+          codeElement.textContent = output;
+        }
+        // Plain text
+        else {
+          codeElement.textContent = output;
+        }
       }
+
+      codeElement.className = `language-${detectedLanguage}`;
+      preElement.appendChild(codeElement);
       outputElement.innerHTML = "";
       outputElement.appendChild(preElement);
+      hljs.highlightElement(codeElement);
+      hljs.lineNumbersBlock(codeElement);
     } else {
       const preElement = document.createElement("pre");
-      preElement.textContent = `Error: ${data.error || data.details || "Request failed"}`;
+      const codeElement = document.createElement("code");
+      codeElement.textContent = `Error: ${data.error || data.details || "Request failed"}`;
+      codeElement.className = "language-text";
+      preElement.appendChild(codeElement);
       outputElement.innerHTML = "";
       outputElement.appendChild(preElement);
+      hljs.highlightElement(codeElement);
+      hljs.lineNumbersBlock(codeElement);
     }
   } catch (error) {
     const preElement = document.createElement("pre");
-    preElement.textContent = `Error: ${error.message}`;
+    const codeElement = document.createElement("code");
+    codeElement.textContent = `Error: ${error.message}`;
+    codeElement.className = "language-text";
+    preElement.appendChild(codeElement);
     outputElement.innerHTML = "";
     outputElement.appendChild(preElement);
+    hljs.highlightElement(codeElement);
+    hljs.lineNumbersBlock(codeElement);
     console.error("Error running curl:", error);
   }
 }
