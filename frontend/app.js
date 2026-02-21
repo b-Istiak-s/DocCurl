@@ -62,7 +62,7 @@ function curlFetcher() {
     playground.innerHTML = `
       <div id="curlPanel-${index}">
         <div class="panelHeader">Request</div>
-        <textarea id="curlScript-${index}" class="curlScript" placeholder="Enter curl command...">${curlCommand}</textarea>
+        <pre class="curlScriptWrapper"><code id="curlScript-${index}" class="curlScript language-bash" contenteditable="true" spellcheck="false">${curlCommand}</code></pre>
         <button id="runButton-${index}" class="runBtn">Run</button>
       </div>
       <div id="responsePanel-${index}">
@@ -81,8 +81,11 @@ function curlFetcher() {
     const curlScript = playground.querySelector(`#curlScript-${index}`);
     const curlOutput = playground.querySelector(`#curlOutput-${index}`);
 
+    // Apply syntax highlighting
+    hljs.highlightElement(curlScript);
+
     runButton.onclick = () => {
-      const command = curlScript.value;
+      const command = curlScript.textContent;
       runCurlCommand(command, curlOutput);
     };
   });

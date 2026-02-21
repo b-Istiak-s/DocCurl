@@ -104,20 +104,29 @@ body {
   overflow: hidden;
 }
 
-.curlPlaygroundInline .curlScript {
+.curlPlaygroundInline .curlScriptWrapper {
   flex: 1;
+  margin: 0;
+  overflow-y: auto;
+  background-color: #282c34;
+}
+
+.curlPlaygroundInline .curlScript {
+  display: block;
   padding: 12px 16px;
   border: none;
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
   resize: none;
-  background-color: #fafafa;
-  color: #333;
+  background-color: transparent;
+  color: #abb2bf;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 100%;
 }
 
 .curlPlaygroundInline .curlScript:focus {
   outline: none;
-  background-color: white;
 }
 
 .curlPlaygroundInline .runBtn {
