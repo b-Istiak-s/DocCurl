@@ -51,6 +51,24 @@
         <div id="fullscreenMount"></div>
       </div>
     </div>
+
+    <div id="authModal" hidden>
+      <div id="authCard">
+        <h3>Enter Password</h3>
+        <p id="authHelpText">This DocCurl project is protected.</p>
+        <form id="authForm">
+          <input
+            id="authPasswordInput"
+            type="password"
+            placeholder="Password"
+            autocomplete="current-password"
+            required
+          />
+          <button id="authSubmitButton" type="submit">Unlock</button>
+        </form>
+        <p id="authError" class="authError"></p>
+      </div>
+    </div>
     <script src="app.js"></script>
   </body>
 </html>

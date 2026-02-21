@@ -6,6 +6,10 @@ const sidebarBackdrop = document.getElementById("sidebarBackdrop");
 const fullscreenModal = document.getElementById("fullscreenModal");
 const fullscreenMount = document.getElementById("fullscreenMount");
 const fullscreenCloseButton = document.getElementById("fullscreenCloseButton");
+const authModal = document.getElementById("authModal");
+const authForm = document.getElementById("authForm");
+const authPasswordInput = document.getElementById("authPasswordInput");
+const authError = document.getElementById("authError");
 
 const STORAGE_KEYS = {
   appUrl: "doccurl.app_url",
@@ -13,9 +17,19 @@ const STORAGE_KEYS = {
 };
 
 const playgroundStates = new Map();
+const expandedDirs = new Set();
 let playgroundCounter = 0;
 let envInputs = { appUrl: null, token: null };
 let fullscreenState = null;
+let authEnabled = false;
+let docsTree = [];
+let currentDocPath = "";
+
+function createUnauthorizedError() {
+  const error = new Error("Unauthorized");
+  error.code = "UNAUTHORIZED";
+  return error;
+}
 
 function setSidebarOpen(isOpen) {
   document.body.classList.toggle("sidebar-open", isOpen);
@@ -27,6 +41,69 @@ function closeSidebar() {
 
 function openSidebar() {
   setSidebarOpen(true);
+}
+
+function showAuthModal(message = "") {
+  if (!authModal) {
+    return;
+  }
+  authModal.hidden = false;
+  authModal.classList.add("is-open");
+  document.body.classList.add("auth-locked");
+  if (authError) {
+    authError.textContent = message;
+  }
+  if (authPasswordInput) {
+    authPasswordInput.value = "";
+    requestAnimationFrame(() => authPasswordInput.focus());
+  }
+}
+
+function hideAuthModal() {
+  if (!authModal) {
+    return;
+  }
+  authModal.classList.remove("is-open");
+  authModal.hidden = true;
+  document.body.classList.remove("auth-locked");
+  if (authError) {
+    authError.textContent = "";
+  }
+}
+
+function handleUnauthorized() {
+  showAuthModal("Session expired. Enter password to continue.");
+}
+
+async function parseJsonSafe(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+async function apiFetch(url, options = {}, { allowUnauthorized = false } = {}) {
+  const response = await fetch(url, options);
+
+  if (
+    authEnabled &&
+    !allowUnauthorized &&
+    (response.status === 401 || response.status === 403)
+  ) {
+    handleUnauthorized();
+    throw createUnauthorizedError();
+  }
+
+  return response;
+}
+
+async function fetchAuthStatus() {
+  const response = await fetch("/api/auth/status");
+  if (!response.ok) {
+    throw new Error("Failed to load auth status");
+  }
+  return parseJsonSafe(response);
 }
 
 function loadStoredEnv() {
@@ -339,7 +416,6 @@ function prettifyTextareaCommand(state) {
 
 function syncCurlOverlay(state, { highlight = true } = {}) {
   const raw = state.editorElement.value || "";
-  // Preserve final line height when textarea ends with newline.
   state.overlayCode.textContent = raw.endsWith("\n") ? `${raw} ` : raw;
   if (highlight && window.hljs) {
     highlightCodeElement(state.overlayCode, "bash");
@@ -464,12 +540,13 @@ function renderResponseOutput(outputElement, rawText, isError = false) {
 async function runCurlCommand(command, outputElement) {
   renderLoading(outputElement);
   try {
-    const response = await fetch("/api/run-curl", {
+    const response = await apiFetch("/api/run-curl", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command }),
     });
-    const data = await response.json();
+
+    const data = await parseJsonSafe(response);
 
     if (response.ok && data.success) {
       renderResponseOutput(outputElement, data.output);
@@ -479,6 +556,10 @@ async function runCurlCommand(command, outputElement) {
     const errorText = data.error || data.details || "Request failed";
     renderResponseOutput(outputElement, `Error: ${errorText}`, true);
   } catch (error) {
+    if (error.code === "UNAUTHORIZED") {
+      showOutputMessage(outputElement, "Error: Unauthorized. Enter password to continue.", true);
+      return;
+    }
     showOutputMessage(outputElement, `Error: ${error.message}`, true);
   }
 }
@@ -653,6 +734,15 @@ function resetDocSession() {
     closeFullscreen();
   }
 
+  const clearedEnv = { appUrl: "", token: "" };
+  persistEnv(clearedEnv);
+  if (envInputs.appUrl) {
+    envInputs.appUrl.value = "";
+  }
+  if (envInputs.token) {
+    envInputs.token.value = "";
+  }
+
   for (const state of playgroundStates.values()) {
     state.editorElement.value = state.originalTemplate;
     syncCurlOverlay(state, { highlight: true });
@@ -673,30 +763,138 @@ function initializeCurlPlaygrounds() {
   });
 }
 
-function setActiveDocButton(filename) {
-  for (const button of docList.querySelectorAll(".docListButton")) {
-    button.classList.toggle("active", button.dataset.filename === filename);
+function expandPathAncestors(filePath) {
+  const parts = filePath.split("/");
+  let cursor = "";
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    cursor = cursor ? `${cursor}/${parts[i]}` : parts[i];
+    expandedDirs.add(cursor);
   }
 }
 
-async function loadDoc(filename) {
+function findFirstFilePath(nodes) {
+  for (const node of nodes) {
+    if (node.type === "file") {
+      return node.path;
+    }
+    if (node.type === "dir") {
+      const nested = findFirstFilePath(node.children || []);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return "";
+}
+
+function docPathExists(nodes, pathValue) {
+  for (const node of nodes) {
+    if (node.type === "file" && node.path === pathValue) {
+      return true;
+    }
+    if (node.type === "dir" && docPathExists(node.children || [], pathValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function renderTreeNodes(nodes, container, depth = 0) {
+  nodes.forEach((node) => {
+    const item = document.createElement("li");
+    item.className = "docTreeItem";
+
+    if (node.type === "dir") {
+      const expanded = expandedDirs.has(node.path);
+      const toggleButton = document.createElement("button");
+      toggleButton.type = "button";
+      toggleButton.className = "docTreeToggle";
+      toggleButton.style.paddingLeft = `${13 + depth * 18}px`;
+      toggleButton.innerHTML = `
+        <span class="docTreeCaret">${expanded ? "▾" : "▸"}</span>
+        <span class="docTreeLabel">${node.name}</span>
+      `;
+
+      if (currentDocPath && currentDocPath.startsWith(`${node.path}/`)) {
+        toggleButton.classList.add("active");
+      }
+
+      toggleButton.addEventListener("click", () => {
+        if (expandedDirs.has(node.path)) {
+          expandedDirs.delete(node.path);
+        } else {
+          expandedDirs.add(node.path);
+        }
+        renderDocTree();
+      });
+
+      item.appendChild(toggleButton);
+
+      if (expanded) {
+        const childrenList = document.createElement("ul");
+        childrenList.className = "docTreeChildren";
+        renderTreeNodes(node.children || [], childrenList, depth + 1);
+        item.appendChild(childrenList);
+      }
+
+      container.appendChild(item);
+      return;
+    }
+
+    if (node.type === "file") {
+      const fileButton = document.createElement("button");
+      fileButton.type = "button";
+      fileButton.className = "docListButton docTreeFileButton";
+      fileButton.style.paddingLeft = `${13 + depth * 18}px`;
+      fileButton.dataset.path = node.path;
+      fileButton.textContent = node.name.replace(/\.md$/, "");
+
+      if (currentDocPath === node.path) {
+        fileButton.classList.add("active");
+      }
+
+      fileButton.addEventListener("click", () => {
+        expandPathAncestors(node.path);
+        loadDoc(node.path);
+      });
+
+      item.appendChild(fileButton);
+      container.appendChild(item);
+    }
+  });
+}
+
+function renderDocTree() {
+  docList.innerHTML = "";
+
+  const root = document.createElement("ul");
+  root.className = "docTreeRoot";
+  renderTreeNodes(docsTree, root, 0);
+  docList.appendChild(root);
+}
+
+async function loadDoc(docPath) {
   if (fullscreenState) {
     closeFullscreen();
   }
 
-  setActiveDocButton(filename);
+  currentDocPath = docPath;
+  renderDocTree();
   docContent.innerHTML = '<div class="loading">Loading document...</div>';
 
   try {
-    const response = await fetch(`/api/docs/${filename}`);
-    const data = await response.json();
+    const response = await apiFetch(
+      `/api/docs/content?path=${encodeURIComponent(docPath)}`,
+    );
 
     if (!response.ok) {
-      docContent.innerHTML = `<p class="errorText">Error: ${data.error}</p>`;
+      const data = await parseJsonSafe(response);
+      docContent.innerHTML = `<p class="errorText">Error: ${data.error || "Unable to load document"}</p>`;
       return;
     }
 
-    docContent.innerHTML = data.html;
+    const data = await parseJsonSafe(response);
+    docContent.innerHTML = data.html || "";
     docContent.prepend(createEnvToolbar());
     initializeCurlPlaygrounds();
 
@@ -704,40 +902,112 @@ async function loadDoc(filename) {
       closeSidebar();
     }
   } catch (error) {
+    if (error.code === "UNAUTHORIZED") {
+      docContent.innerHTML = '<p class="errorText">Authentication required.</p>';
+      return;
+    }
+
     docContent.innerHTML =
       '<p class="errorText">Error loading document. Please try again.</p>';
     console.error("Error loading document:", error);
   }
 }
 
-async function loadDocsList() {
+async function loadDocsTree() {
   try {
-    const response = await fetch("/api/docs");
-    const files = await response.json();
+    const response = await apiFetch("/api/docs/tree");
 
-    docList.innerHTML = "";
-    files.forEach((file) => {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "docListButton";
-      button.dataset.filename = file;
-      button.textContent = file.replace(".md", "");
-      button.addEventListener("click", () => {
-        loadDoc(file);
-      });
-      item.appendChild(button);
-      docList.appendChild(item);
-    });
+    if (!response.ok) {
+      const data = await parseJsonSafe(response);
+      docList.innerHTML = `<li class="errorText">${data.error || "Error loading docs tree"}</li>`;
+      return;
+    }
 
-    if (files.length > 0) {
-      loadDoc(files[0]);
+    const data = await parseJsonSafe(response);
+    docsTree = Array.isArray(data.tree) ? data.tree : [];
+
+    renderDocTree();
+
+    if (docsTree.length === 0) {
+      docContent.innerHTML = '<p class="errorText">No markdown docs found.</p>';
+      return;
+    }
+
+    if (currentDocPath && docPathExists(docsTree, currentDocPath)) {
+      expandPathAncestors(currentDocPath);
+      renderDocTree();
+      await loadDoc(currentDocPath);
+      return;
+    }
+
+    const firstFilePath = findFirstFilePath(docsTree);
+    if (firstFilePath) {
+      expandPathAncestors(firstFilePath);
+      renderDocTree();
+      await loadDoc(firstFilePath);
     } else {
       docContent.innerHTML = '<p class="errorText">No markdown docs found.</p>';
     }
   } catch (error) {
-    docList.innerHTML = '<li class="errorText">Error loading docs list</li>';
-    console.error("Error loading docs:", error);
+    if (error.code === "UNAUTHORIZED") {
+      return;
+    }
+
+    docList.innerHTML = '<li class="errorText">Error loading docs tree</li>';
+    console.error("Error loading docs tree:", error);
+  }
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  const password = authPasswordInput ? authPasswordInput.value : "";
+
+  try {
+    const response = await apiFetch(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      },
+      { allowUnauthorized: true },
+    );
+
+    const data = await parseJsonSafe(response);
+    if (!response.ok) {
+      if (authError) {
+        authError.textContent = data.error || "Invalid password";
+      }
+      return;
+    }
+
+    hideAuthModal();
+    await loadDocsTree();
+  } catch (error) {
+    if (authError) {
+      authError.textContent = "Unable to verify password. Try again.";
+    }
+    console.error("Authentication error:", error);
+  }
+}
+
+async function bootstrapApp() {
+  try {
+    const status = await fetchAuthStatus();
+    authEnabled = Boolean(status.authEnabled);
+
+    if (authEnabled && !status.authenticated) {
+      showAuthModal("Enter password to unlock this project.");
+      return;
+    }
+
+    hideAuthModal();
+    await loadDocsTree();
+  } catch (error) {
+    docList.innerHTML = '<li class="errorText">Failed to initialize</li>';
+    docContent.innerHTML =
+      '<p class="errorText">Unable to initialize app. Please refresh.</p>';
+    console.error("Bootstrap error:", error);
   }
 }
 
@@ -761,6 +1031,9 @@ fullscreenModal.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (!authModal.hidden) {
+      return;
+    }
     if (fullscreenState) {
       closeFullscreen();
       return;
@@ -771,4 +1044,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadDocsList();
+if (authForm) {
+  authForm.addEventListener("submit", handleAuthSubmit);
+}
+
+bootstrapApp();
