@@ -4,7 +4,7 @@
   "description": "Interactive curl command documentation viewer with live playground",
   "main": "backend/server.js",
   "bin": {
-    "doccurl": "./bin/doccurl.js"
+    "doccurl": "bin/doccurl.js"
   },
   "scripts": {
     "dev": "npx nodemon -e js,json -x \"node -e 'require(\\\"./backend/server\\\").startServer(3000, \\\"../docs\\\", { dev: true })'\"",
@@ -15,9 +15,12 @@
     "curl",
     "documentation",
     "interactive",
-    "playground"
+    "playground",
+    "api",
+    "testing",
+    "markdown"
   ],
-  "author": "",
+  "author": "Billy Istiak <billyistiak@gmail.com>",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
