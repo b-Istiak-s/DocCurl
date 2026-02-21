@@ -19,10 +19,11 @@ program
   .command("serve")
   .option("-p, --port <port>", "Port number", "3000")
   .option("-d, --dir <dir>", "Docs directory", "docs")
+  .option("--dev", "Allow localhost/private targets for local testing")
   .action((options) => {
     const port = parseInt(options.port, 10);
     const docsDir = path.resolve(process.cwd(), options.dir);
-    startServer(port, docsDir);
+    startServer(port, docsDir, { dev: Boolean(options.dev) });
   });
 
 program.parse(process.argv);

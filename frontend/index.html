@@ -2,6 +2,7 @@
 <html>
   <head>
     <title>DocCurl</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
     <link
       rel="stylesheet"
@@ -11,12 +12,44 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
   </head>
   <body>
-    <div id="sidebar">
-      <h2>Docs</h2>
-      <ul id="docList"></ul>
+    <div id="appShell">
+      <div id="mobileTopbar">
+        <button id="mobileMenuButton" class="ghostButton" type="button">
+          Docs
+        </button>
+        <span class="appTitle">DocCurl</span>
+      </div>
+      <aside id="sidebar">
+        <div class="sidebarHeader">
+          <h2>Docs</h2>
+          <button
+            id="sidebarCloseButton"
+            class="ghostButton sidebarClose"
+            type="button"
+            aria-label="Close navigation"
+          >
+            ×
+          </button>
+        </div>
+        <ul id="docList"></ul>
+      </aside>
+      <div id="sidebarBackdrop"></div>
+      <main id="content">
+        <div id="docContent"></div>
+      </main>
     </div>
-    <div id="content">
-      <div id="docContent"></div>
+
+    <div id="fullscreenModal" hidden>
+      <div id="fullscreenContent">
+        <button
+          id="fullscreenCloseButton"
+          type="button"
+          aria-label="Exit fullscreen"
+        >
+          ×
+        </button>
+        <div id="fullscreenMount"></div>
+      </div>
     </div>
     <script src="app.js"></script>
   </body>

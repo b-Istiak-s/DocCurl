@@ -1,4 +1,4 @@
-const startServer = (port = 3000, projectName) => {
+const startServer = (port = 3000, projectName, options = {}) => {
   const express = require("express");
   const path = require("path");
   const fs = require("fs");
@@ -15,13 +15,14 @@ const startServer = (port = 3000, projectName) => {
     : path.join(__dirname, projectName);
 
   // Middleware
-  app.use(express.json({ limit: "10kb" }));
+  app.use(express.json({ limit: "128kb" }));
 
   // Serve static files from the frontend directory
   app.use(express.static(path.join(__dirname, "../frontend")));
 
   // Setup curl routes
-  setupCurlRoutes(app);
+  const isDev = Boolean(options.dev);
+  setupCurlRoutes(app, { isDev });
 
   // API endpoint to get list of markdown files
   app.get("/api/docs", (req, res) => {
@@ -60,7 +61,9 @@ const startServer = (port = 3000, projectName) => {
   });
 
   return app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(
+      `Server is running on http://localhost:${PORT} (${isDev ? "development" : "production"} mode)`,
+    );
   });
 };
 

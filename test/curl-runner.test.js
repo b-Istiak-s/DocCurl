@@ -1,0 +1,325 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const express = require("express");
+
+const setupCurlRoutes = require("../backend/curl-runner");
+const {
+  parseCurlCommand,
+  validateTargetUrl,
+} = require("../backend/curl-runner");
+
+async function withServer(options, run) {
+  const app = express();
+  app.use(express.json({ limit: "128kb" }));
+  setupCurlRoutes(app, {
+    containerRuntime: "docker",
+    ...options,
+  });
+
+  const server = await new Promise((resolve) => {
+    const started = app.listen(0, () => resolve(started));
+  });
+
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    await run(baseUrl);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+}
+
+test("parseCurlCommand preserves full multiline JSON body", () => {
+  const command = `curl -X POST "https://api.example.com/api/auth/register" \\
+ -H "Content-Type: application/json" \\
+ -d '{"name":"Employee","email":"employee@example.com","password":"password"}'`;
+
+  const parsed = parseCurlCommand(command);
+  assert.equal(parsed.method, "POST");
+  assert.equal(parsed.url, "https://api.example.com/api/auth/register");
+  assert.equal(
+    parsed.body,
+    '{"name":"Employee","email":"employee@example.com","password":"password"}',
+  );
+});
+
+test("parseCurlCommand parses quoted URL and headers", () => {
+  const parsed = parseCurlCommand(
+    'curl --url "https://api.example.com:8443/users" -H "Authorization: Bearer abc123"',
+  );
+
+  assert.equal(parsed.method, "GET");
+  assert.equal(parsed.url, "https://api.example.com:8443/users");
+  assert.deepEqual(parsed.headers, [
+    { name: "Authorization", value: "Bearer abc123" },
+  ]);
+});
+
+test("parseCurlCommand rejects multipart form flags", () => {
+  assert.throws(
+    () => parseCurlCommand('curl -F "file=@/tmp/x.pdf" https://api.example.com'),
+    /not supported/i,
+  );
+});
+
+test("parseCurlCommand rejects unsupported flags", () => {
+  assert.throws(
+    () => parseCurlCommand("curl --proxy http://proxy.local https://api.example.com"),
+    /Unsupported flag/i,
+  );
+});
+
+test("validateTargetUrl blocks localhost and private targets in production", async () => {
+  const blockedUrls = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://10.0.0.1:8080",
+    "http://192.168.1.8:8080",
+    "http://172.16.0.9:8080",
+    "http://[::1]:8080",
+    "http://[fd00::1]:8080",
+  ];
+
+  for (const url of blockedUrls) {
+    const error = await validateTargetUrl(url, { isDev: false });
+    assert.ok(error, `Expected blocked URL to fail validation: ${url}`);
+  }
+});
+
+test("validateTargetUrl blocks DNS names resolving to private addresses", async () => {
+  const error = await validateTargetUrl("https://api.example.com", {
+    isDev: false,
+    dnsLookup: async () => [{ address: "10.20.30.40" }],
+  });
+  assert.match(error, /blocked/i);
+});
+
+test("validateTargetUrl allows public host on non-default port in production", async () => {
+  const error = await validateTargetUrl("https://api.example.com:8443/path", {
+    isDev: false,
+    dnsLookup: async () => [{ address: "8.8.8.8" }],
+  });
+  assert.equal(error, null);
+});
+
+test("validateTargetUrl allows localhost in development mode", async () => {
+  const error = await validateTargetUrl("http://localhost:3000/path", {
+    isDev: true,
+  });
+  assert.equal(error, null);
+});
+
+test("POST /api/run-curl returns 400 for missing payload", async () => {
+  await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: () => {
+        throw new Error("exec should not be called for invalid payload");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 400);
+      assert.match(data.error, /Invalid payload/i);
+    },
+  );
+});
+
+test("POST /api/run-curl rejects blocked URL before execution", async () => {
+  let called = false;
+  await withServer(
+    {
+      isDev: false,
+      execFileImpl: () => {
+        called = true;
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "curl http://127.0.0.1:3000/health" }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 400);
+      assert.match(data.error, /blocked/i);
+      assert.equal(called, false);
+    },
+  );
+});
+
+test("POST /api/run-curl executes valid parsed command with hardened container args", async () => {
+  const calls = [];
+  await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: (command, args, options, callback) => {
+        calls.push({ command, args, options });
+        callback(null, '{"ok":true}', "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/ping"' }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.equal(data.output, '{"ok":true}');
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.ok(["docker", "podman"].includes(calls[0].command));
+  assert.ok(calls[0].args.includes("--cap-drop=ALL"));
+  assert.ok(calls[0].args.includes("--security-opt=no-new-privileges"));
+  assert.ok(calls[0].args.includes("--network=bridge"));
+  assert.equal(calls[0].args.includes("--network=host"), false);
+});
+
+test("POST /api/run-curl keeps backward compatibility for legacy payload", async () => {
+  await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.4.4" }],
+      execFileImpl: (command, args, _options, callback) => {
+        assert.ok(["docker", "podman"].includes(command));
+        assert.ok(args.includes("--data-raw"));
+        assert.ok(args.includes('{"ok":true}'));
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: "https://api.example.com/v1",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: '{"ok":true}',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.equal(data.output, "ok");
+    },
+  );
+});
+
+test("POST /api/run-curl uses host network in dev mode for localhost targets", async () => {
+  const calls = [];
+  await withServer(
+    {
+      isDev: true,
+      execFileImpl: (command, args, _options, callback) => {
+        calls.push({ command, args });
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "http://localhost:3000/health"' }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.includes("--network=host"));
+});
+
+test("POST /api/run-curl keeps bridge network in production mode", async () => {
+  const calls = [];
+  await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: (_command, args, _options, callback) => {
+        calls.push(args);
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "https://api.example.com/ping"' }),
+      });
+      assert.equal(response.status, 200);
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes("--network=bridge"));
+  assert.equal(calls[0].includes("--network=host"), false);
+});
+
+test("POST /api/run-curl continues when /etc/containers/nodocker creation fails", async () => {
+  const warnings = [];
+  await withServer(
+    {
+      isDev: true,
+      containerRuntime: "podman",
+      fsAccess: async () => {
+        const error = new Error("missing");
+        error.code = "ENOENT";
+        throw error;
+      },
+      fsWriteFile: async () => {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      },
+      logger: {
+        warn: (message) => warnings.push(String(message)),
+      },
+      execFileImpl: (_command, _args, _options, callback) => {
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "http://localhost:3000/health"' }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+    },
+  );
+
+  assert.equal(warnings.length > 0, true);
+  assert.equal(
+    warnings.some((message) =>
+      message.includes("sudo touch /etc/containers/nodocker"),
+    ),
+    true,
+  );
+});
