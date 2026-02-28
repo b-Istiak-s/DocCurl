@@ -25,6 +25,39 @@ let authEnabled = false;
 let docsTree = [];
 let currentDocPath = "";
 
+function inferBasePathFromPathname(pathname) {
+  // Remove query/hash if present, then work only with the path portion.
+  const cleanPath = String(pathname || "/").split(/[?#]/, 1)[0];
+
+  // Remove trailing slashes: "/Z/docs/" => "/Z/docs"
+  // Regex: \/+$ matches one or more slashes at the end
+  const normalized = cleanPath.replace(/\/+$/, "") || "/";
+
+  // Root path ("/") => no base prefix needed.
+  if (normalized === "/") {
+    return "";
+  }
+
+  // Use the entire current path as base without modification.
+  // Examples: "/docs" => "/docs", "/Z/docs" => "/Z/docs"
+  return normalized;
+}
+
+// Auto-detect base path from current URL pathname.
+// For CLI usage with Nginx proxy (e.g., Y.com/Z/docs), this automatically
+// detects the mount prefix and routes API calls correctly.
+const docsBasePath = inferBasePathFromPathname(window.location.pathname);
+
+function withBasePath(path) {
+  // Regex /^\/+/: strip any leading slashes from input path,
+  // then prepend a single slash for consistent joining.
+  const normalizedPath = `/${String(path || "").replace(/^\/+/, "")}`;
+
+  // If docsBasePath is "", result is "/api/...".
+  // If docsBasePath is "/docs", result is "/docs/api/...".
+  return `${docsBasePath}${normalizedPath}`;
+}
+
 function createUnauthorizedError() {
   const error = new Error("Unauthorized");
   error.code = "UNAUTHORIZED";
@@ -99,7 +132,7 @@ async function apiFetch(url, options = {}, { allowUnauthorized = false } = {}) {
 }
 
 async function fetchAuthStatus() {
-  const response = await fetch("/api/auth/status");
+  const response = await fetch(withBasePath("/api/auth/status"));
   if (!response.ok) {
     throw new Error("Failed to load auth status");
   }
@@ -540,7 +573,7 @@ function renderResponseOutput(outputElement, rawText, isError = false) {
 async function runCurlCommand(command, outputElement) {
   renderLoading(outputElement);
   try {
-    const response = await apiFetch("/api/run-curl", {
+    const response = await apiFetch(withBasePath("/api/run-curl"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command }),
@@ -557,7 +590,11 @@ async function runCurlCommand(command, outputElement) {
     renderResponseOutput(outputElement, `Error: ${errorText}`, true);
   } catch (error) {
     if (error.code === "UNAUTHORIZED") {
-      showOutputMessage(outputElement, "Error: Unauthorized. Enter password to continue.", true);
+      showOutputMessage(
+        outputElement,
+        "Error: Unauthorized. Enter password to continue.",
+        true,
+      );
       return;
     }
     showOutputMessage(outputElement, `Error: ${error.message}`, true);
@@ -884,7 +921,7 @@ async function loadDoc(docPath) {
 
   try {
     const response = await apiFetch(
-      `/api/docs/content?path=${encodeURIComponent(docPath)}`,
+      withBasePath(`/api/docs/content?path=${encodeURIComponent(docPath)}`),
     );
 
     if (!response.ok) {
@@ -903,7 +940,8 @@ async function loadDoc(docPath) {
     }
   } catch (error) {
     if (error.code === "UNAUTHORIZED") {
-      docContent.innerHTML = '<p class="errorText">Authentication required.</p>';
+      docContent.innerHTML =
+        '<p class="errorText">Authentication required.</p>';
       return;
     }
 
@@ -915,7 +953,7 @@ async function loadDoc(docPath) {
 
 async function loadDocsTree() {
   try {
-    const response = await apiFetch("/api/docs/tree");
+    const response = await apiFetch(withBasePath("/api/docs/tree"));
 
     if (!response.ok) {
       const data = await parseJsonSafe(response);
@@ -964,7 +1002,7 @@ async function handleAuthSubmit(event) {
 
   try {
     const response = await apiFetch(
-      "/api/auth/login",
+      withBasePath("/api/auth/login"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
