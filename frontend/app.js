@@ -206,9 +206,9 @@ function normalizeEnvName(name) {
 
 function extractPlaceholderNames(text) {
   const names = new Set();
-  String(text || "").replace(/\$([A-Za-z_][A-Za-z0-9_]*)\b/g, (_match, name) => {
+  String(text || "").replace(/\$([A-Za-z_][A-Za-z0-9_]*)\b/g, (matchText, name) => {
     names.add(name);
-    return _match;
+    return matchText;
   });
   return Array.from(names);
 }
@@ -222,7 +222,7 @@ function collectPlaceholderNamesFromDocument(container = docContent) {
 }
 
 function shouldMaskEnvValue(name) {
-  return /token|secret|password|key/i.test(name);
+  return /token|secret|password|api[_-]?key|bearer|credential|auth|session/i.test(name);
 }
 
 function updateEnvValueInputType(nameInput, valueInput) {
@@ -318,7 +318,7 @@ function renderEnvFields(values = loadStoredEnv(), suggestedNames = []) {
 
   orderedNames.forEach((name) => {
     envToolbarState.fieldsContainer.appendChild(
-      createEnvField(name, Object.prototype.hasOwnProperty.call(values, name) ? values[name] : ""),
+      createEnvField(name, Object.hasOwn(values, name) ? values[name] : ""),
     );
   });
 }
@@ -575,8 +575,7 @@ function formatCurlCommand(command) {
 function replacePlaceholders(text, env) {
   return String(text || "").replace(
     /\$([A-Za-z_][A-Za-z0-9_]*)\b/g,
-    (match, name) =>
-      Object.prototype.hasOwnProperty.call(env, name) ? env[name] : match,
+    (match, name) => (Object.hasOwn(env, name) ? env[name] : match),
   );
 }
 

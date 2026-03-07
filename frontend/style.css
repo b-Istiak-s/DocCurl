@@ -276,10 +276,7 @@ body.auth-locked {
   font-weight: 600;
   font-size: 0.82rem;
   cursor: pointer;
-  transition:
-    transform 0.2s ease,
-    border-color 0.2s ease,
-    background-color 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .secondaryBtn,
