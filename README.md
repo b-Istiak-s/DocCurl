@@ -164,12 +164,9 @@ curl -X POST $APP_URL/api/data \
 
 ### Environment Variables
 
-DocCurl supports two built-in environment variables:
+DocCurl supports environment variable placeholders such as **`$APP_URL`**, **`$TOKEN`**, or any other **`$VARIABLE_NAME`** you use in curl examples.
 
-- **`$APP_URL`** - Base URL of your API (e.g., `https://api.example.com`)
-- **`$TOKEN`** - Authentication token
-
-Users can set these in the UI, and they persist in localStorage.
+Users can add, edit, and remove variables in the UI, and the values persist in localStorage. When a matching variable exists, DocCurl replaces it before sending the curl command to the backend. If a variable is not defined, the placeholder is left unchanged.
 
 ### Supported Curl Options
 
