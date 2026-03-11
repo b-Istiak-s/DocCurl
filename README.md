@@ -22,6 +22,7 @@ Requirements:
 
 - Node.js 18+
 - Docker or Podman
+- ESM-capable runtime (doccurl is now fully ESM)
 
 ## Quick Start
 
@@ -123,6 +124,17 @@ Example run-curl request:
 npm install
 npm run dev
 npm test
+```
+
+## Project Layout
+
+```txt
+core/      # pure auth/docs domain logic
+engine/    # curl parse/validate/network/runtime/route
+server/    # express app composition and API route wiring
+cli/       # command entrypoint and commands
+frontend/  # browser ESM modules and static UI assets
+test/      # engine/server/frontend test suites
 ```
 
 ## Links
