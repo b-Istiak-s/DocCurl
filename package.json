@@ -2,13 +2,13 @@
   "name": "doccurl",
   "version": "1.0.1",
   "description": "Interactive curl command documentation viewer with live playground",
-  "main": "backend/server.js",
+  "main": "server/index.js",
   "bin": {
-    "doccurl": "bin/doccurl.js"
+    "doccurl": "cli/index.js"
   },
   "scripts": {
-    "dev": "npx nodemon -e js,json -x \"node -e 'require(\\\"./backend/server\\\").startServer(3000, \\\"../docs\\\", { dev: true })'\"",
-    "start": "node -e 'require(\"./backend/server\").startServer(3000, \"docs\")'",
+    "dev": "npx nodemon -e js,json,html,css,md -x \"node cli/index.js serve --port 3000 --dir docs --dev\"",
+    "start": "node cli/index.js serve --port 3000 --dir docs",
     "test": "node --test"
   },
   "keywords": [
@@ -30,7 +30,10 @@
     "url": "https://github.com/b-Istiak-s/doccurl/issues"
   },
   "homepage": "https://github.com/b-Istiak-s/doccurl#readme",
-  "type": "commonjs",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "commander": "^12.0.0",
     "express": "^5.2.1",
