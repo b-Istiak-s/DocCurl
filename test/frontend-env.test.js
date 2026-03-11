@@ -304,10 +304,10 @@ test("replacePlaceholders supports arbitrary variables and leaves missing placeh
   const context = await loadFrontendApp();
 
   const command =
-    'curl "$APP_URL/v1/users" -H "Authorization: Bearer $TOKEN" -H "X-Tenant: $TENANT" -H "X-Missing: $MISSING"';
+    'curl "$BASE_URL/v1/users" -H "Authorization: Bearer $API_TOKEN" -H "X-Tenant: $TENANT" -H "X-Missing: $MISSING"';
   const resolved = context.replacePlaceholders(command, {
-    APP_URL: "https://api.example.com",
-    TOKEN: "abc123",
+    BASE_URL: "https://api.example.com",
+    API_TOKEN: "abc123",
     TENANT: "blue",
   });
 
@@ -317,16 +317,12 @@ test("replacePlaceholders supports arbitrary variables and leaves missing placeh
   );
 });
 
-test("loadStoredEnv preserves legacy APP_URL/TOKEN values alongside stored arbitrary variables", async () => {
+test("loadStoredEnv returns values from doccurl.env", async () => {
   const context = await loadFrontendApp({
-    "doccurl.app_url": "https://legacy.example.com",
-    "doccurl.token": "legacy-token",
     "doccurl.env": JSON.stringify({ TENANT: "green" }),
   });
 
   assert.deepEqual(JSON.parse(JSON.stringify(context.loadStoredEnv())), {
-    APP_URL: "https://legacy.example.com",
-    TOKEN: "legacy-token",
     TENANT: "green",
   });
 });
@@ -334,12 +330,12 @@ test("loadStoredEnv preserves legacy APP_URL/TOKEN values alongside stored arbit
 test("createEnvToolbar allows adding and removing variables and persists them to localStorage", async () => {
   const context = await loadFrontendApp();
 
-  const toolbar = context.createEnvToolbar(["APP_URL"]);
+  const toolbar = context.createEnvToolbar(["BASE_URL"]);
   const nameInputs = toolbar.querySelectorAll(".envNameInput");
   const valueInputs = toolbar.querySelectorAll(".envValueInput");
 
   assert.equal(nameInputs.length, 1);
-  assert.equal(nameInputs[0].value, "APP_URL");
+  assert.equal(nameInputs[0].value, "BASE_URL");
   assert.equal(valueInputs[0].type, "text");
 
   valueInputs[0].value = "https://api.example.com";
@@ -351,7 +347,7 @@ test("createEnvToolbar allows adding and removing variables and persists them to
   const updatedValueInputs = toolbar.querySelectorAll(".envValueInput");
   assert.equal(updatedNameInputs.length, 2);
 
-  updatedNameInputs[1].value = "TOKEN";
+  updatedNameInputs[1].value = "API_TOKEN";
   updatedNameInputs[1].dispatch("input");
   assert.equal(updatedValueInputs[1].type, "password");
 
@@ -362,6 +358,6 @@ test("createEnvToolbar allows adding and removing variables and persists them to
   removeButtons[0].click();
 
   assert.deepEqual(JSON.parse(context.localStorage.getItem("doccurl.env")), {
-    TOKEN: "secret-token",
+    API_TOKEN: "secret-token",
   });
 });
