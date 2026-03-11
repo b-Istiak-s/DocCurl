@@ -215,6 +215,48 @@ body.auth-locked {
   margin-bottom: 16px;
 }
 
+.envToolbarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.envToolbarTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #264255;
+}
+
+.envToolbarToggle {
+  border: 1px solid #c7d1db;
+  background: #f8fbfd;
+  color: #264255;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.envToolbarToggle:hover {
+  transform: translateY(-1px);
+  border-color: #9eb3c4;
+  background: #eef4f8;
+}
+
+.envToolbarBody {
+  display: grid;
+  gap: 12px;
+}
+
+.docEnvBar.is-collapsed .envToolbarBody {
+  display: none;
+}
+
 .envToolbarHint {
   color: var(--muted);
   font-size: 0.9rem;

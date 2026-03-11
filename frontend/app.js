@@ -13,8 +13,6 @@ const authError = document.getElementById("authError");
 
 const STORAGE_KEYS = {
   env: "doccurl.env",
-  legacyAppUrl: "doccurl.app_url",
-  legacyToken: "doccurl.token",
 };
 
 const playgroundStates = new Map();
@@ -142,26 +140,15 @@ async function fetchAuthStatus() {
 }
 
 function loadStoredEnv() {
-  const legacyEnv = {};
-  const legacyAppUrl = localStorage.getItem(STORAGE_KEYS.legacyAppUrl);
-  const legacyToken = localStorage.getItem(STORAGE_KEYS.legacyToken);
-
-  if (legacyAppUrl !== null) {
-    legacyEnv.APP_URL = legacyAppUrl;
-  }
-  if (legacyToken !== null) {
-    legacyEnv.TOKEN = legacyToken;
-  }
-
   const rawValue = localStorage.getItem(STORAGE_KEYS.env);
   if (!rawValue) {
-    return legacyEnv;
+    return {};
   }
 
   try {
     const parsed = JSON.parse(rawValue);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return legacyEnv;
+      return {};
     }
 
     const normalized = {};
@@ -173,9 +160,9 @@ function loadStoredEnv() {
       normalized[normalizedName] = String(value ?? "");
     }
 
-    return { ...legacyEnv, ...normalized };
+    return normalized;
   } catch {
-    return legacyEnv;
+    return {};
   }
 }
 
@@ -196,8 +183,6 @@ function getCurrentEnv() {
 
 function persistEnv(values) {
   localStorage.setItem(STORAGE_KEYS.env, JSON.stringify(values));
-  localStorage.removeItem(STORAGE_KEYS.legacyAppUrl);
-  localStorage.removeItem(STORAGE_KEYS.legacyToken);
 }
 
 function normalizeEnvName(name) {
@@ -246,7 +231,7 @@ function createEnvField(name = "", value = "") {
   const nameInput = document.createElement("input");
   nameInput.type = "text";
   nameInput.className = "envNameInput";
-  nameInput.placeholder = "APP_URL";
+  nameInput.placeholder = "VARIABLE_NAME";
   nameInput.setAttribute("aria-label", "Environment variable name");
   nameInput.value = name;
 
@@ -781,6 +766,26 @@ function createEnvToolbar(suggestedNames = []) {
   const envValues = loadStoredEnv();
   const toolbar = document.createElement("div");
   toolbar.className = "docEnvBar";
+
+  const header = document.createElement("div");
+  header.className = "envToolbarHeader";
+
+  const title = document.createElement("h3");
+  title.className = "envToolbarTitle";
+  title.textContent = "Environment Variables";
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "envToolbarToggle";
+  toggleButton.setAttribute("aria-expanded", "false");
+  toggleButton.setAttribute("aria-label", "Toggle environment variables");
+  toggleButton.textContent = "Show";
+
+  header.append(title, toggleButton);
+
+  const body = document.createElement("div");
+  body.className = "envToolbarBody";
+
   const hint = document.createElement("div");
   hint.className = "envToolbarHint";
   hint.textContent =
@@ -805,7 +810,9 @@ function createEnvToolbar(suggestedNames = []) {
   resetButton.textContent = "Clear all changes";
 
   actions.append(addButton, resetButton);
-  toolbar.append(hint, fieldsContainer, actions);
+  body.append(hint, fieldsContainer, actions);
+  toolbar.append(header, body);
+  toolbar.classList.add("is-collapsed");
 
   envToolbarState = {
     fieldsContainer,
@@ -820,6 +827,12 @@ function createEnvToolbar(suggestedNames = []) {
   });
 
   resetButton.addEventListener("click", resetDocSession);
+  toggleButton.addEventListener("click", () => {
+    const isCollapsed = toolbar.classList.toggle("is-collapsed");
+    const expanded = !isCollapsed;
+    toggleButton.setAttribute("aria-expanded", String(expanded));
+    toggleButton.textContent = expanded ? "Hide" : "Show";
+  });
 
   return toolbar;
 }
