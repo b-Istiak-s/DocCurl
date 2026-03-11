@@ -1,8 +1,9 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  createEnvManager,
+  replacePlaceholders,
+} from "../../frontend/modules/env.js";
 
 class MockClassList {
   constructor(element) {
@@ -50,9 +51,8 @@ class MockClassList {
 }
 
 class MockElement {
-  constructor(tagName = "div", ownerDocument = null) {
+  constructor(tagName = "div") {
     this.tagName = String(tagName).toUpperCase();
-    this.ownerDocument = ownerDocument;
     this.children = [];
     this.parentElement = null;
     this.attributes = {};
@@ -96,16 +96,6 @@ class MockElement {
     nodes.forEach((node) => this.appendChild(node));
   }
 
-  prepend(...nodes) {
-    nodes
-      .slice()
-      .reverse()
-      .forEach((node) => {
-        node.parentElement = this;
-        this.children.unshift(node);
-      });
-  }
-
   remove() {
     if (!this.parentElement) {
       return;
@@ -114,25 +104,6 @@ class MockElement {
     if (index >= 0) {
       this.parentElement.children.splice(index, 1);
     }
-    this.parentElement = null;
-  }
-
-  after(node) {
-    if (!this.parentElement) {
-      return;
-    }
-    const index = this.parentElement.children.indexOf(this);
-    node.parentElement = this.parentElement;
-    this.parentElement.children.splice(index + 1, 0, node);
-  }
-
-  replaceWith(node) {
-    if (!this.parentElement) {
-      return;
-    }
-    const index = this.parentElement.children.indexOf(this);
-    node.parentElement = this.parentElement;
-    this.parentElement.children.splice(index, 1, node);
     this.parentElement = null;
   }
 
@@ -166,8 +137,6 @@ class MockElement {
   click() {
     this.dispatch("click");
   }
-
-  focus() {}
 
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] || null;
@@ -228,84 +197,21 @@ function createLocalStorage(initial = {}) {
     removeItem(key) {
       store.delete(key);
     },
-    dump() {
-      return Object.fromEntries(store.entries());
-    },
   };
 }
 
-async function loadFrontendApp(initialStorage = {}) {
-  const source = fs.readFileSync(
-    path.join(__dirname, "..", "frontend", "app.js"),
-    "utf8",
-  );
-
-  const documentElements = {};
-  const document = {
-    body: new MockElement("body"),
+function createDocument() {
+  return {
     createElement(tagName) {
-      return new MockElement(tagName, document);
+      return new MockElement(tagName);
     },
-    getElementById(id) {
-      if (!documentElements[id]) {
-        const element = new MockElement("div", document);
-        element.id = id;
-        documentElements[id] = element;
-      }
-      return documentElements[id];
-    },
-    addEventListener() {},
   };
-
-  const context = {
-    console,
-    document,
-    localStorage: createLocalStorage(initialStorage),
-    window: {
-      location: { pathname: "/" },
-      matchMedia: () => ({ matches: false }),
-      hljs: null,
-    },
-    requestAnimationFrame: (callback) => callback(),
-    fetch: async (url) => {
-      if (String(url).includes("/api/auth/status")) {
-        return {
-          ok: true,
-          async json() {
-            return { authEnabled: false, authenticated: true };
-          },
-        };
-      }
-
-      if (String(url).includes("/api/docs/tree")) {
-        return {
-          ok: true,
-          async json() {
-            return { tree: [] };
-          },
-        };
-      }
-
-      throw new Error(`Unexpected fetch in test: ${url}`);
-    },
-    setTimeout,
-    clearTimeout,
-  };
-
-  vm.runInNewContext(source, context, {
-    filename: path.join(__dirname, "..", "frontend", "app.js"),
-  });
-
-  await Promise.resolve();
-  return context;
 }
 
-test("replacePlaceholders supports arbitrary variables and leaves missing placeholders unchanged", async () => {
-  const context = await loadFrontendApp();
-
+test("replacePlaceholders supports arbitrary variables and leaves missing placeholders unchanged", () => {
   const command =
     'curl "$BASE_URL/v1/users" -H "Authorization: Bearer $API_TOKEN" -H "X-Tenant: $TENANT" -H "X-Missing: $MISSING"';
-  const resolved = context.replacePlaceholders(command, {
+  const resolved = replacePlaceholders(command, {
     BASE_URL: "https://api.example.com",
     API_TOKEN: "abc123",
     TENANT: "blue",
@@ -317,20 +223,27 @@ test("replacePlaceholders supports arbitrary variables and leaves missing placeh
   );
 });
 
-test("loadStoredEnv returns values from doccurl.env", async () => {
-  const context = await loadFrontendApp({
-    "doccurl.env": JSON.stringify({ TENANT: "green" }),
+test("loadStoredEnv returns values from doccurl.env", () => {
+  const envManager = createEnvManager({
+    documentRef: createDocument(),
+    localStorageRef: createLocalStorage({
+      "doccurl.env": JSON.stringify({ TENANT: "green" }),
+    }),
   });
 
-  assert.deepEqual(JSON.parse(JSON.stringify(context.loadStoredEnv())), {
+  assert.deepEqual(envManager.loadStoredEnv(), {
     TENANT: "green",
   });
 });
 
-test("createEnvToolbar allows adding and removing variables and persists them to localStorage", async () => {
-  const context = await loadFrontendApp();
+test("createEnvToolbar allows adding and removing variables and persists them to localStorage", () => {
+  const localStorageRef = createLocalStorage({});
+  const envManager = createEnvManager({
+    documentRef: createDocument(),
+    localStorageRef,
+  });
 
-  const toolbar = context.createEnvToolbar(["BASE_URL"]);
+  const toolbar = envManager.createEnvToolbar(["BASE_URL"]);
   const nameInputs = toolbar.querySelectorAll(".envNameInput");
   const valueInputs = toolbar.querySelectorAll(".envValueInput");
 
@@ -357,7 +270,7 @@ test("createEnvToolbar allows adding and removing variables and persists them to
   const removeButtons = toolbar.querySelectorAll(".removeEnvBtn");
   removeButtons[0].click();
 
-  assert.deepEqual(JSON.parse(context.localStorage.getItem("doccurl.env")), {
+  assert.deepEqual(JSON.parse(localStorageRef.getItem("doccurl.env")), {
     API_TOKEN: "secret-token",
   });
 });
