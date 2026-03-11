@@ -73,7 +73,7 @@ The main HTML structure containing:
 - **UI Management**: Sidebar toggle, modals, responsive behavior
 - **Navigation**: Loading and rendering the documentation tree
 - **Playground Management**: Creating, managing, and destroying interactive curl playgrounds
-- **Environment Variables**: Managing `$APP_URL` and `$TOKEN` via localStorage
+- **Environment Variables**: Managing placeholders via localStorage
 - **API Communication**: Fetching docs, authenticating, executing curl commands
 
 **Key Functions:**
@@ -86,7 +86,7 @@ The main HTML structure containing:
 | `createPlayground(codeElement, curlCommand)` | Creates an interactive playground from a curl code block |
 | `executeCurlCommand(state)`                  | Sends curl command to `/api/run-curl` endpoint           |
 | `tokenizeShell(input)`                       | Parses shell commands for placeholder substitution       |
-| `replacePlaceholders(text, env)`             | Replaces `$APP_URL` and `$TOKEN` in commands             |
+| `replacePlaceholders(text, env)`             | Replaces matching placeholders in commands               |
 | `formatCurlCommand(command)`                 | Pretty-prints curl commands                              |
 | `syncCurlOverlay(state)`                     | Updates syntax highlighting overlay                      |
 | `prettifyMarkup(input)`                      | Formats XML/HTML responses                               |
@@ -97,7 +97,7 @@ The main HTML structure containing:
 1. User clicks "Run" button
 2. `executeCurlCommand()` retrieves command from textarea
 3. Detects missing environment variables (`detectMissingEnv()`)
-4. Replaces `$APP_URL` and `$TOKEN` placeholders
+4. Replaces configured placeholders (for example `$BASE_URL`, `$API_TOKEN`)
 5. Sends POST to `/api/run-curl` with `{ command: "..." }`
 6. Displays output or error in result panel
 7. Applies syntax highlighting and prettification
@@ -606,7 +606,7 @@ User clicks "Run"
   ↓
 app.js: executeCurlCommand(state)
   ↓
-replacePlaceholders($APP_URL, $TOKEN)
+replacePlaceholders($BASE_URL, $API_TOKEN)
   ↓
 POST /api/run-curl { command: "curl ..." }
   ↓
@@ -705,8 +705,7 @@ app.js: Display result with highlighting
 | `playgroundStates`    | Map (memory)    | Manages all active playgrounds by ID |
 | `envInputs`           | Object (memory) | References to env input elements     |
 | `fullscreenState`     | Object (memory) | Tracks fullscreen playground state   |
-| `localStorage.appUrl` | Browser storage | Persists `$APP_URL`                  |
-| `localStorage.token`  | Browser storage | Persists `$TOKEN`                    |
+| `localStorage.env`    | Browser storage | Persists environment variable values |
 
 ### Backend State
 

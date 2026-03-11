@@ -12,14 +12,14 @@ const authPasswordInput = document.getElementById("authPasswordInput");
 const authError = document.getElementById("authError");
 
 const STORAGE_KEYS = {
-  appUrl: "doccurl.app_url",
-  token: "doccurl.token",
+  env: "doccurl.env",
 };
 
 const playgroundStates = new Map();
 const expandedDirs = new Set();
 let playgroundCounter = 0;
-let envInputs = { appUrl: null, token: null };
+let envInputs = [];
+let envToolbarState = { fieldsContainer: null, suggestedNames: [] };
 let fullscreenState = null;
 let authEnabled = false;
 let docsTree = [];
@@ -140,25 +140,172 @@ async function fetchAuthStatus() {
 }
 
 function loadStoredEnv() {
-  return {
-    appUrl: localStorage.getItem(STORAGE_KEYS.appUrl) || "",
-    token: localStorage.getItem(STORAGE_KEYS.token) || "",
-  };
+  const rawValue = localStorage.getItem(STORAGE_KEYS.env);
+  if (!rawValue) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const normalized = {};
+    for (const [name, value] of Object.entries(parsed)) {
+      const normalizedName = normalizeEnvName(name);
+      if (!normalizedName) {
+        continue;
+      }
+      normalized[normalizedName] = String(value ?? "");
+    }
+
+    return normalized;
+  } catch {
+    return {};
+  }
 }
 
 function getCurrentEnv() {
-  if (envInputs.appUrl && envInputs.token) {
-    return {
-      appUrl: envInputs.appUrl.value.trim(),
-      token: envInputs.token.value.trim(),
-    };
+  if (envInputs.length > 0) {
+    const nextEnv = {};
+    envInputs.forEach(({ nameInput, valueInput }) => {
+      const name = normalizeEnvName(nameInput.value);
+      if (!name) {
+        return;
+      }
+      nextEnv[name] = valueInput.value.trim();
+    });
+    return nextEnv;
   }
   return loadStoredEnv();
 }
 
 function persistEnv(values) {
-  localStorage.setItem(STORAGE_KEYS.appUrl, values.appUrl);
-  localStorage.setItem(STORAGE_KEYS.token, values.token);
+  localStorage.setItem(STORAGE_KEYS.env, JSON.stringify(values));
+}
+
+function normalizeEnvName(name) {
+  return String(name || "").trim().replace(/^\$/, "");
+}
+
+function extractPlaceholderNames(text) {
+  const names = new Set();
+  String(text || "").replace(/\$([A-Za-z_][A-Za-z0-9_]*)\b/g, (matchText, name) => {
+    names.add(name);
+    return matchText;
+  });
+  return Array.from(names);
+}
+
+function collectPlaceholderNamesFromDocument(container = docContent) {
+  const names = new Set();
+  container.querySelectorAll("pre code.language-curl").forEach((block) => {
+    extractPlaceholderNames(block.textContent).forEach((name) => names.add(name));
+  });
+  return Array.from(names);
+}
+
+function shouldMaskEnvValue(name) {
+  return /token|secret|password|api[_-]?key|bearer|credential|auth|session/i.test(name);
+}
+
+function updateEnvValueInputType(nameInput, valueInput) {
+  valueInput.type = shouldMaskEnvValue(nameInput.value) ? "password" : "text";
+}
+
+function persistCurrentEnv() {
+  persistEnv(getCurrentEnv());
+}
+
+function createEnvField(name = "", value = "") {
+  const row = document.createElement("div");
+  row.className = "envFieldRow";
+
+  const nameField = document.createElement("div");
+  nameField.className = "envField";
+
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Variable";
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "envNameInput";
+  nameInput.placeholder = "VARIABLE_NAME";
+  nameInput.setAttribute("aria-label", "Environment variable name");
+  nameInput.value = name;
+
+  nameField.append(nameLabel, nameInput);
+
+  const valueField = document.createElement("div");
+  valueField.className = "envField";
+
+  const valueLabel = document.createElement("label");
+  valueLabel.textContent = "Value";
+
+  const valueInput = document.createElement("input");
+  valueInput.className = "envValueInput";
+  valueInput.placeholder = "Environment variable value";
+  valueInput.setAttribute("aria-label", "Environment variable value");
+  valueInput.value = value;
+  updateEnvValueInputType(nameInput, valueInput);
+
+  valueField.append(valueLabel, valueInput);
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "removeEnvBtn";
+  removeButton.textContent = "Remove";
+  removeButton.setAttribute("aria-label", `Remove ${name || "environment variable"}`);
+
+  const inputState = { row, nameInput, valueInput, removeButton };
+  envInputs.push(inputState);
+
+  const handleInput = () => {
+    updateEnvValueInputType(nameInput, valueInput);
+    removeButton.setAttribute(
+      "aria-label",
+      `Remove ${normalizeEnvName(nameInput.value) || "environment variable"}`,
+    );
+    persistCurrentEnv();
+  };
+
+  nameInput.addEventListener("input", handleInput);
+  valueInput.addEventListener("input", handleInput);
+  removeButton.addEventListener("click", () => {
+    envInputs = envInputs.filter((entry) => entry !== inputState);
+    row.remove();
+    persistCurrentEnv();
+  });
+
+  row.append(nameField, valueField, removeButton);
+  return row;
+}
+
+function renderEnvFields(values = loadStoredEnv(), suggestedNames = []) {
+  if (!envToolbarState.fieldsContainer) {
+    return;
+  }
+
+  envToolbarState.fieldsContainer.innerHTML = "";
+  envInputs = [];
+
+  const orderedNames = Array.from(
+    new Set([
+      ...suggestedNames.map(normalizeEnvName).filter(Boolean),
+      ...Object.keys(values).map(normalizeEnvName).filter(Boolean),
+    ]),
+  );
+
+  if (orderedNames.length === 0) {
+    orderedNames.push("");
+  }
+
+  orderedNames.forEach((name) => {
+    envToolbarState.fieldsContainer.appendChild(
+      createEnvField(name, Object.hasOwn(values, name) ? values[name] : ""),
+    );
+  });
 }
 
 function tokenizeShell(input) {
@@ -411,25 +558,10 @@ function formatCurlCommand(command) {
 }
 
 function replacePlaceholders(text, env) {
-  let nextText = text;
-  if (env.appUrl) {
-    nextText = nextText.replace(/\$APP_URL\b/g, env.appUrl);
-  }
-  if (env.token) {
-    nextText = nextText.replace(/\$TOKEN\b/g, env.token);
-  }
-  return nextText;
-}
-
-function detectMissingEnv(command, env) {
-  const missing = [];
-  if (/\$APP_URL\b/.test(command) && !env.appUrl) {
-    missing.push("APP_URL");
-  }
-  if (/\$TOKEN\b/.test(command) && !env.token) {
-    missing.push("TOKEN");
-  }
-  return missing;
+  return String(text || "").replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*)\b/g,
+    (match, name) => (Object.hasOwn(env, name) ? env[name] : match),
+  );
 }
 
 function highlightCodeElement(codeElement, language = "plaintext") {
@@ -630,41 +762,77 @@ function closeFullscreen() {
   document.body.classList.remove("fullscreen-open");
 }
 
-function createEnvToolbar() {
+function createEnvToolbar(suggestedNames = []) {
   const envValues = loadStoredEnv();
   const toolbar = document.createElement("div");
   toolbar.className = "docEnvBar";
-  toolbar.innerHTML = `
-    <div class="envField">
-      <label for="doccurl-app-url">APP_URL</label>
-      <input id="doccurl-app-url" type="text" placeholder="https://api.example.com" />
-    </div>
-    <div class="envField">
-      <label for="doccurl-token">TOKEN</label>
-      <input id="doccurl-token" type="password" placeholder="Paste bearer token" />
-    </div>
-    <div class="envActions">
-      <button id="doccurl-reset-all" class="resetBtn" type="button">Clear all changes</button>
-    </div>
-  `;
 
-  envInputs = {
-    appUrl: toolbar.querySelector("#doccurl-app-url"),
-    token: toolbar.querySelector("#doccurl-token"),
+  const header = document.createElement("div");
+  header.className = "envToolbarHeader";
+
+  const title = document.createElement("h3");
+  title.className = "envToolbarTitle";
+  title.textContent = "Environment Variables";
+
+  const toggleButton = document.createElement("button");
+  toggleButton.type = "button";
+  toggleButton.className = "envToolbarToggle";
+  toggleButton.setAttribute("aria-expanded", "false");
+  toggleButton.setAttribute("aria-label", "Toggle environment variables");
+  toggleButton.textContent = "Show";
+
+  header.append(title, toggleButton);
+
+  const body = document.createElement("div");
+  body.className = "envToolbarBody";
+
+  const hint = document.createElement("div");
+  hint.className = "envToolbarHint";
+  hint.textContent =
+    "Add environment variables to replace matching $VARIABLE placeholders before running curl commands.";
+
+  const fieldsContainer = document.createElement("div");
+  fieldsContainer.className = "envFieldList";
+
+  const actions = document.createElement("div");
+  actions.className = "envActions";
+
+  const addButton = document.createElement("button");
+  addButton.id = "doccurl-add-env";
+  addButton.className = "secondaryBtn";
+  addButton.type = "button";
+  addButton.textContent = "Add variable";
+
+  const resetButton = document.createElement("button");
+  resetButton.id = "doccurl-reset-all";
+  resetButton.className = "resetBtn";
+  resetButton.type = "button";
+  resetButton.textContent = "Clear all changes";
+
+  actions.append(addButton, resetButton);
+  body.append(hint, fieldsContainer, actions);
+  toolbar.append(header, body);
+  toolbar.classList.add("is-collapsed");
+
+  envToolbarState = {
+    fieldsContainer,
+    suggestedNames: Array.from(new Set(suggestedNames.map(normalizeEnvName).filter(Boolean))),
   };
+  renderEnvFields(envValues, envToolbarState.suggestedNames);
 
-  envInputs.appUrl.value = envValues.appUrl;
-  envInputs.token.value = envValues.token;
+  addButton.addEventListener("click", () => {
+    const row = createEnvField();
+    envToolbarState.fieldsContainer.appendChild(row);
+    persistCurrentEnv();
+  });
 
-  const onInput = () => {
-    persistEnv(getCurrentEnv());
-  };
-
-  envInputs.appUrl.addEventListener("input", onInput);
-  envInputs.token.addEventListener("input", onInput);
-
-  const resetButton = toolbar.querySelector("#doccurl-reset-all");
   resetButton.addEventListener("click", resetDocSession);
+  toggleButton.addEventListener("click", () => {
+    const isCollapsed = toolbar.classList.toggle("is-collapsed");
+    const expanded = !isCollapsed;
+    toggleButton.setAttribute("aria-expanded", String(expanded));
+    toggleButton.textContent = expanded ? "Hide" : "Show";
+  });
 
   return toolbar;
 }
@@ -745,16 +913,6 @@ function createPlayground(curlCommand) {
   runButton.addEventListener("click", async () => {
     const env = getCurrentEnv();
     const visibleCommand = editorElement.value || "";
-    const missing = detectMissingEnv(visibleCommand, env);
-    if (missing.length > 0) {
-      showOutputMessage(
-        outputElement,
-        `Error: Missing required value(s): ${missing.join(", ")}`,
-        true,
-      );
-      return;
-    }
-
     const resolvedCommand = replacePlaceholders(visibleCommand, env);
     await runCurlCommand(resolvedCommand, outputElement);
   });
@@ -771,14 +929,8 @@ function resetDocSession() {
     closeFullscreen();
   }
 
-  const clearedEnv = { appUrl: "", token: "" };
-  persistEnv(clearedEnv);
-  if (envInputs.appUrl) {
-    envInputs.appUrl.value = "";
-  }
-  if (envInputs.token) {
-    envInputs.token.value = "";
-  }
+  persistEnv({});
+  renderEnvFields({}, envToolbarState.suggestedNames);
 
   for (const state of playgroundStates.values()) {
     state.editorElement.value = state.originalTemplate;
@@ -932,7 +1084,8 @@ async function loadDoc(docPath) {
 
     const data = await parseJsonSafe(response);
     docContent.innerHTML = data.html || "";
-    docContent.prepend(createEnvToolbar());
+    const placeholderNames = collectPlaceholderNamesFromDocument(docContent);
+    docContent.prepend(createEnvToolbar(placeholderNames));
     initializeCurlPlaygrounds();
 
     if (window.matchMedia("(max-width: 960px)").matches) {

@@ -211,9 +211,67 @@ body.auth-locked {
   box-shadow: var(--shadow);
   padding: 14px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.envToolbarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.envToolbarTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #264255;
+}
+
+.envToolbarToggle {
+  border: 1px solid #c7d1db;
+  background: #f8fbfd;
+  color: #264255;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.envToolbarToggle:hover {
+  transform: translateY(-1px);
+  border-color: #9eb3c4;
+  background: #eef4f8;
+}
+
+.envToolbarBody {
+  display: grid;
+  gap: 12px;
+}
+
+.docEnvBar.is-collapsed .envToolbarBody {
+  display: none;
+}
+
+.envToolbarHint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.envFieldList {
+  display: grid;
+  gap: 12px;
+}
+
+.envFieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
+  gap: 12px;
+  align-items: end;
 }
 
 .envField {
@@ -246,14 +304,15 @@ body.auth-locked {
 
 .envActions {
   display: flex;
-  align-items: end;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
+.secondaryBtn,
+.removeEnvBtn,
 .resetBtn {
-  border: 1px solid #c7d1db;
-  background: #f8fbfd;
-  color: #264255;
   border-radius: var(--radius-sm);
   padding: 10px 13px;
   font-weight: 600;
@@ -262,10 +321,34 @@ body.auth-locked {
   transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
+.secondaryBtn,
+.resetBtn {
+  border: 1px solid #c7d1db;
+  background: #f8fbfd;
+  color: #264255;
+}
+
+.removeEnvBtn {
+  border: 1px solid #d7c5c5;
+  background: #fff7f7;
+  color: #7c2e2e;
+}
+
+.secondaryBtn:hover,
+.removeEnvBtn:hover,
 .resetBtn:hover {
   transform: translateY(-1px);
+}
+
+.secondaryBtn:hover,
+.resetBtn:hover {
   border-color: #9eb3c4;
   background: #eef4f8;
+}
+
+.removeEnvBtn:hover {
+  border-color: #c99f9f;
+  background: #fdeeee;
 }
 
 .panelHeader {
@@ -664,10 +747,17 @@ body.auth-locked {
     grid-template-columns: 1fr;
   }
 
+  .envFieldRow,
+  .envActions {
+    grid-template-columns: 1fr;
+  }
+
   .envActions {
     justify-content: stretch;
   }
 
+  .secondaryBtn,
+  .removeEnvBtn,
   .resetBtn {
     width: 100%;
   }
