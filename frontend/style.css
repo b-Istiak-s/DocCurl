@@ -16,6 +16,14 @@
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
+  --curl-pane-min-height: 320px;
+  --curl-pane-max-height: 560px;
+  --curl-pane-height: clamp(var(--curl-pane-min-height), 42vh, var(--curl-pane-max-height));
+  --curl-editor-padding: 14px;
+  --curl-editor-font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  --curl-editor-font-size: 0.84rem;
+  --curl-editor-line-height: 1.7;
+  --curl-editor-tab-size: 2;
 }
 
 * {
@@ -76,7 +84,7 @@ body.auth-locked {
   color: var(--sidebar-text);
   border-right: 1px solid rgba(255, 255, 255, 0.12);
   overflow-y: auto;
-  min-height: 100dvh;
+  height: 100dvh;
   position: sticky;
   top: 0;
 }
@@ -188,13 +196,10 @@ body.auth-locked {
 #content {
   min-width: 0;
   min-height: 100dvh;
-  overflow: hidden;
 }
 
 #docContent {
-  height: 100%;
   min-height: 100dvh;
-  overflow-y: auto;
   padding: 22px;
   line-height: 1.65;
 }
@@ -362,6 +367,88 @@ body.auth-locked {
   color: #586471;
 }
 
+.responseHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.responseMetaBtn {
+  border: 1px solid #c7d1db;
+  background: #ffffff;
+  color: #264255;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.responseMetaBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #9eb3c4;
+}
+
+.responseMetaBtn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.responseMetaToast {
+  position: absolute;
+  top: 52px;
+  right: 14px;
+  z-index: 5;
+  width: min(260px, calc(100% - 28px));
+  border: 1px solid rgba(27, 45, 61, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 30px rgba(10, 34, 57, 0.18);
+  color: #173447;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.responseMetaToast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.responseMetaToastTitle {
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #4e6272;
+}
+
+.responseMetaToastList {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.responseMetaToastList dt {
+  margin: 0;
+  font-weight: 700;
+  color: #264255;
+}
+
+.responseMetaToastList dd {
+  margin: 0;
+  min-width: 0;
+  color: #516676;
+  word-break: break-word;
+}
+
 .curlPlaygroundInline {
   position: relative;
   width: 100%;
@@ -373,7 +460,6 @@ body.auth-locked {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   background: var(--surface);
   box-shadow: var(--shadow);
-  min-height: 260px;
 }
 
 .playgroundPane {
@@ -381,6 +467,9 @@ body.auth-locked {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: var(--curl-pane-min-height);
+  height: var(--curl-pane-height);
+  max-height: var(--curl-pane-max-height);
 }
 
 .playgroundPane + .playgroundPane {
@@ -390,6 +479,7 @@ body.auth-locked {
 .curlScriptWrapper {
   flex: 1;
   overflow: hidden;
+  min-height: 0;
   background: #111e2f;
 }
 
@@ -397,7 +487,7 @@ body.auth-locked {
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 300px;
+  min-height: 0;
   background: #111e2f;
   overflow: hidden;
 }
@@ -406,46 +496,52 @@ body.auth-locked {
   position: absolute;
   inset: 0;
   margin: 0;
-  padding: 14px;
   overflow: auto;
   pointer-events: none;
+  padding: var(--curl-editor-padding);
+  font-family: var(--curl-editor-font-family);
+  font-size: var(--curl-editor-font-size);
+  line-height: var(--curl-editor-line-height);
+  tab-size: var(--curl-editor-tab-size);
 }
 
 .curlOverlay code {
   display: block;
   min-height: 100%;
-  font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  font-size: 0.84rem;
-  line-height: 1.7;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
   white-space: pre;
-  tab-size: 2;
+  tab-size: inherit;
   color: #cae2ff;
 }
 
 .curlOverlay code.hljs {
   background: transparent !important;
   color: #cae2ff;
+  padding: 0 !important;
 }
 
 .curlEditor {
   position: relative;
   z-index: 2;
   width: 100%;
-  min-height: 300px;
+  min-height: 0;
   height: 100%;
-  padding: 14px;
+  padding: var(--curl-editor-padding);
   margin: 0;
   border: none;
-  resize: vertical;
+  resize: none;
   overflow: auto;
   background: transparent;
   color: #cae2ff;
   caret-color: #cae2ff;
-  font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  font-size: 0.84rem;
-  line-height: 1.7;
+  font-family: var(--curl-editor-font-family);
+  font-size: var(--curl-editor-font-size);
+  line-height: var(--curl-editor-line-height);
   white-space: pre;
-  tab-size: 2;
+  tab-size: var(--curl-editor-tab-size);
 }
 
 .curlEditorShell.overlay-active .curlEditor {
@@ -466,11 +562,12 @@ body.auth-locked {
   flex: 1;
   overflow: auto;
   padding: 14px;
+  min-height: 0;
   background: linear-gradient(180deg, #0f141b 0%, #111b25 100%);
   color: #d5e3f3;
-  font-family: "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  font-size: 0.81rem;
-  line-height: 1.7;
+  font-family: var(--curl-editor-font-family);
+  font-size: var(--curl-editor-font-size);
+  line-height: var(--curl-editor-line-height);
 }
 
 .curlOutput pre {
@@ -548,6 +645,7 @@ body.auth-locked {
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 36px 14px 14px;
+  overflow: auto;
 }
 
 #fullscreenCloseButton {
@@ -569,18 +667,19 @@ body.auth-locked {
 
 #fullscreenMount {
   height: 100%;
+  min-height: 100%;
 }
 
 #fullscreenMount .curlPlaygroundInline {
   height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 
-#fullscreenMount .curlOverlay,
-#fullscreenMount .curlEditorShell,
-#fullscreenMount .curlEditor {
+#fullscreenMount .playgroundPane {
   min-height: 0;
   height: 100%;
+  max-height: none;
 }
 
 #authModal {
@@ -669,7 +768,6 @@ body.auth-locked {
 
   .curlPlaygroundInline {
     grid-template-columns: 1fr;
-    min-height: 0;
   }
 
   .playgroundPane + .playgroundPane {
@@ -740,7 +838,6 @@ body.auth-locked {
 
   #docContent {
     min-height: calc(100dvh - 50px);
-    height: calc(100dvh - 50px);
   }
 
   .docEnvBar {

@@ -13,7 +13,9 @@ export async function bootstrapApp() {
   const sidebarBackdrop = document.getElementById("sidebarBackdrop");
   const fullscreenModal = document.getElementById("fullscreenModal");
   const fullscreenMount = document.getElementById("fullscreenMount");
-  const fullscreenCloseButton = document.getElementById("fullscreenCloseButton");
+  const fullscreenCloseButton = document.getElementById(
+    "fullscreenCloseButton",
+  );
   const authModal = document.getElementById("authModal");
   const authForm = document.getElementById("authForm");
   const authPasswordInput = document.getElementById("authPasswordInput");
@@ -35,7 +37,6 @@ export async function bootstrapApp() {
 
   const docsBasePath = inferBasePathFromPathname(window.location.pathname);
   const withBasePath = createWithBasePath(docsBasePath);
-
   const authController = createAuthController({
     authModal,
     authForm,
@@ -90,7 +91,10 @@ export async function bootstrapApp() {
   sidebarCloseButton.addEventListener("click", closeSidebar);
   sidebarBackdrop.addEventListener("click", closeSidebar);
 
-  fullscreenCloseButton.addEventListener("click", playgroundSystem.closeFullscreen);
+  fullscreenCloseButton.addEventListener(
+    "click",
+    playgroundSystem.closeFullscreen,
+  );
   fullscreenModal.addEventListener("click", (event) => {
     if (event.target === fullscreenModal) {
       playgroundSystem.closeFullscreen();
@@ -125,7 +129,8 @@ export async function bootstrapApp() {
     await docsTreeSystem.loadDocsTree();
   } catch (error) {
     docList.innerHTML = '<li class="errorText">Failed to initialize</li>';
-    docContent.innerHTML = '<p class="errorText">Unable to initialize app. Please refresh.</p>';
+    docContent.innerHTML =
+      '<p class="errorText">Unable to initialize app. Please refresh.</p>';
     console.error("Bootstrap error:", error);
   }
 }

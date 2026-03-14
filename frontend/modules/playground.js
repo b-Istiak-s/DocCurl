@@ -338,6 +338,107 @@ function renderEmpty(outputElement) {
   outputElement.innerHTML = '<div class="outputEmpty">Run a request to see the response</div>';
 }
 
+function normalizeResponseMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const statusCode = Number.isFinite(metadata.statusCode) ? metadata.statusCode : null;
+  const contentType =
+    typeof metadata.contentType === "string" && metadata.contentType.trim()
+      ? metadata.contentType.trim()
+      : null;
+  const durationMs = Number.isFinite(metadata.durationMs) ? metadata.durationMs : null;
+
+  if (statusCode == null && contentType == null && durationMs == null) {
+    return null;
+  }
+
+  return {
+    statusCode,
+    contentType,
+    durationMs,
+  };
+}
+
+function formatResponseDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return "Unavailable";
+  }
+
+  if (durationMs < 1000) {
+    return `${durationMs} ms`;
+  }
+
+  const seconds = durationMs / 1000;
+  return `${seconds.toFixed(seconds >= 10 ? 1 : 2).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0$/, "$1")} s`;
+}
+
+function hideResponseMetaToast(state) {
+  if (state.responseMetaTimeoutId) {
+    window.clearTimeout(state.responseMetaTimeoutId);
+    state.responseMetaTimeoutId = null;
+  }
+  state.responseMetaToast.classList.remove("is-visible");
+}
+
+function renderResponseMetaToast(state) {
+  const metadata = state.responseMetadata;
+  if (!metadata) {
+    state.responseMetaToast.replaceChildren();
+    return;
+  }
+
+  const items = [
+    ["Status", metadata.statusCode == null ? "Unavailable" : String(metadata.statusCode)],
+    ["Content-Type", metadata.contentType || "Unavailable"],
+    ["Time", formatResponseDuration(metadata.durationMs)],
+  ];
+
+  const titleElement = document.createElement("div");
+  titleElement.className = "responseMetaToastTitle";
+  titleElement.textContent = "Response Details";
+
+  const listElement = document.createElement("dl");
+  listElement.className = "responseMetaToastList";
+
+  items.forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+
+    const description = document.createElement("dd");
+    description.textContent = value;
+
+    listElement.append(term, description);
+  });
+
+  state.responseMetaToast.replaceChildren(titleElement, listElement);
+}
+
+function showResponseMetaToast(state) {
+  if (!state.responseMetadata) {
+    return;
+  }
+
+  renderResponseMetaToast(state);
+  state.responseMetaToast.classList.add("is-visible");
+
+  if (state.responseMetaTimeoutId) {
+    window.clearTimeout(state.responseMetaTimeoutId);
+  }
+
+  state.responseMetaTimeoutId = window.setTimeout(() => {
+    state.responseMetaToast.classList.remove("is-visible");
+    state.responseMetaTimeoutId = null;
+  }, 5000);
+}
+
+function setResponseMetadata(state, metadata) {
+  state.responseMetadata = normalizeResponseMetadata(metadata);
+  state.responseMetaButton.disabled = !state.responseMetadata;
+  hideResponseMetaToast(state);
+}
+
 function renderResponseOutput(outputElement, rawText, isError = false) {
   const output = String(rawText || "").trim();
   if (!output) {
@@ -428,8 +529,9 @@ export function createPlaygroundSystem({
     document.body.classList.remove("fullscreen-open");
   }
 
-  async function runCurlCommand(command, outputElement) {
-    renderLoading(outputElement);
+  async function runCurlCommand(command, state) {
+    renderLoading(state.outputElement);
+    setResponseMetadata(state, null);
     try {
       const response = await apiFetch(withBasePath("/api/run-curl"), {
         method: "POST",
@@ -440,18 +542,23 @@ export function createPlaygroundSystem({
       const data = await parseJsonSafe(response);
 
       if (response.ok && data.success) {
-        renderResponseOutput(outputElement, data.output);
+        renderResponseOutput(state.outputElement, data.output);
+        setResponseMetadata(state, data.metadata);
         return;
       }
 
       const errorText = data.error || data.details || "Request failed";
-      renderResponseOutput(outputElement, `Error: ${errorText}`, true);
+      renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
-        showOutputMessage(outputElement, "Error: Unauthorized. Enter password to continue.", true);
+        showOutputMessage(
+          state.outputElement,
+          "Error: Unauthorized. Enter password to continue.",
+          true,
+        );
         return;
       }
-      showOutputMessage(outputElement, `Error: ${error.message}`, true);
+      showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
     }
   }
 
@@ -475,8 +582,12 @@ export function createPlaygroundSystem({
           <button type="button" class="runBtn">Run</button>
         </div>
       </section>
-      <section class="playgroundPane">
-        <div class="panelHeader">Response</div>
+      <section class="playgroundPane responsePane">
+        <div class="panelHeader responseHeader">
+          <span>Response</span>
+          <button type="button" class="responseMetaBtn" disabled>Details</button>
+        </div>
+        <div class="responseMetaToast" role="status" aria-live="polite"></div>
         <div class="curlOutput">
           <div class="outputEmpty">Run a request to see the response</div>
         </div>
@@ -491,6 +602,8 @@ export function createPlaygroundSystem({
     const overlayElement = playground.querySelector(".curlOverlay");
     const overlayCode = overlayElement.querySelector("code");
     const outputElement = playground.querySelector(".curlOutput");
+    const responseMetaButton = playground.querySelector(".responseMetaBtn");
+    const responseMetaToast = playground.querySelector(".responseMetaToast");
     const runButton = playground.querySelector(".runBtn");
     const fullscreenButton = playground.querySelector(".fullscreenBtn");
 
@@ -504,14 +617,19 @@ export function createPlaygroundSystem({
       overlayElement,
       overlayCode,
       outputElement,
+      responseMetaButton,
+      responseMetaToast,
       runButton,
       fullscreenButton,
       originalTemplate,
+      responseMetadata: null,
+      responseMetaTimeoutId: null,
     };
     playgroundStates.set(playgroundId, state);
 
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
+    setResponseMetadata(state, null);
 
     editorElement.addEventListener("input", () => {
       syncCurlOverlay(state, { highlight: true });
@@ -532,11 +650,15 @@ export function createPlaygroundSystem({
       const env = envManager.getCurrentEnv();
       const visibleCommand = editorElement.value || "";
       const resolvedCommand = replacePlaceholders(visibleCommand, env);
-      await runCurlCommand(resolvedCommand, outputElement);
+      await runCurlCommand(resolvedCommand, state);
     });
 
     fullscreenButton.addEventListener("click", () => {
       openFullscreen(playground);
+    });
+
+    responseMetaButton.addEventListener("click", () => {
+      showResponseMetaToast(state);
     });
 
     return playground;
@@ -554,6 +676,7 @@ export function createPlaygroundSystem({
       state.editorElement.value = state.originalTemplate;
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
+      setResponseMetadata(state, null);
       renderEmpty(state.outputElement);
     }
   }

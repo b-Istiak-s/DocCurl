@@ -236,23 +236,58 @@ test("loadStoredEnv returns values from doccurl.env", () => {
   });
 });
 
+test("defaultEnvValues are available in the effective env and do not overwrite stored values", () => {
+  const envManagerWithDefault = createEnvManager({
+    documentRef: createDocument(),
+    localStorageRef: createLocalStorage({}),
+    defaultEnvValues: {
+      DOCCURL_BASE_URL: "http://localhost:3000",
+    },
+  });
+
+  assert.deepEqual(envManagerWithDefault.getCurrentEnv(), {
+    DOCCURL_BASE_URL: "http://localhost:3000",
+  });
+
+  const envManagerWithStoredOverride = createEnvManager({
+    documentRef: createDocument(),
+    localStorageRef: createLocalStorage({
+      "doccurl.env": JSON.stringify({
+        DOCCURL_BASE_URL: "http://localhost:4321/custom",
+      }),
+    }),
+    defaultEnvValues: {
+      DOCCURL_BASE_URL: "http://localhost:3000",
+    },
+  });
+
+  const toolbar = envManagerWithStoredOverride.createEnvToolbar(["DOCCURL_BASE_URL"]);
+  const valueInputs = toolbar.querySelectorAll(".envValueInput");
+
+  assert.equal(valueInputs[0].value, "http://localhost:4321/custom");
+  assert.deepEqual(envManagerWithStoredOverride.getCurrentEnv(), {
+    DOCCURL_BASE_URL: "http://localhost:4321/custom",
+  });
+});
+
 test("createEnvToolbar allows adding and removing variables and persists them to localStorage", () => {
   const localStorageRef = createLocalStorage({});
   const envManager = createEnvManager({
     documentRef: createDocument(),
     localStorageRef,
+    defaultEnvValues: {
+      DOCCURL_BASE_URL: "http://localhost:3000",
+    },
   });
 
-  const toolbar = envManager.createEnvToolbar(["BASE_URL"]);
+  const toolbar = envManager.createEnvToolbar(["DOCCURL_BASE_URL"]);
   const nameInputs = toolbar.querySelectorAll(".envNameInput");
   const valueInputs = toolbar.querySelectorAll(".envValueInput");
 
   assert.equal(nameInputs.length, 1);
-  assert.equal(nameInputs[0].value, "BASE_URL");
+  assert.equal(nameInputs[0].value, "DOCCURL_BASE_URL");
+  assert.equal(valueInputs[0].value, "http://localhost:3000");
   assert.equal(valueInputs[0].type, "text");
-
-  valueInputs[0].value = "https://api.example.com";
-  valueInputs[0].dispatch("input");
 
   toolbar.querySelector("#doccurl-add-env").click();
 

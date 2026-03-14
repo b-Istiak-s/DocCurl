@@ -30,9 +30,57 @@ function updateEnvValueInputType(nameInput, valueInput) {
   valueInput.type = shouldMaskEnvValue(nameInput.value) ? "password" : "text";
 }
 
-export function createEnvManager({ localStorageRef = localStorage, documentRef = document } = {}) {
+function normalizeEnvValues(values) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [name, value] of Object.entries(values)) {
+    const normalizedName = normalizeEnvName(name);
+    if (!normalizedName) {
+      continue;
+    }
+    normalized[normalizedName] = String(value ?? "");
+  }
+  return normalized;
+}
+
+export function createEnvManager({
+  localStorageRef = localStorage,
+  documentRef = document,
+  defaultEnvValues = {},
+} = {}) {
   let envInputs = [];
   let envToolbarState = { fieldsContainer: null, suggestedNames: [] };
+
+  function getDefaultEnvValues() {
+    return normalizeEnvValues(
+      typeof defaultEnvValues === "function" ? defaultEnvValues() : defaultEnvValues,
+    );
+  }
+
+  function getEffectiveEnv(values = loadStoredEnv()) {
+    return {
+      ...getDefaultEnvValues(),
+      ...normalizeEnvValues(values),
+    };
+  }
+
+  function sanitizePersistedEnv(values) {
+    const defaults = getDefaultEnvValues();
+    const normalized = normalizeEnvValues(values);
+    const persisted = {};
+
+    for (const [name, value] of Object.entries(normalized)) {
+      if (Object.hasOwn(defaults, name) && defaults[name] === value) {
+        continue;
+      }
+      persisted[name] = value;
+    }
+
+    return persisted;
+  }
 
   function loadStoredEnv() {
     const rawValue = localStorageRef.getItem(STORAGE_KEYS.env);
@@ -42,20 +90,7 @@ export function createEnvManager({ localStorageRef = localStorage, documentRef =
 
     try {
       const parsed = JSON.parse(rawValue);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return {};
-      }
-
-      const normalized = {};
-      for (const [name, value] of Object.entries(parsed)) {
-        const normalizedName = normalizeEnvName(name);
-        if (!normalizedName) {
-          continue;
-        }
-        normalized[normalizedName] = String(value ?? "");
-      }
-
-      return normalized;
+      return normalizeEnvValues(parsed);
     } catch {
       return {};
     }
@@ -71,13 +106,13 @@ export function createEnvManager({ localStorageRef = localStorage, documentRef =
         }
         nextEnv[name] = valueInput.value.trim();
       });
-      return nextEnv;
+      return getEffectiveEnv(nextEnv);
     }
-    return loadStoredEnv();
+    return getEffectiveEnv();
   }
 
   function persistEnv(values) {
-    localStorageRef.setItem(STORAGE_KEYS.env, JSON.stringify(values));
+    localStorageRef.setItem(STORAGE_KEYS.env, JSON.stringify(sanitizePersistedEnv(values)));
   }
 
   function persistCurrentEnv() {
@@ -156,10 +191,12 @@ export function createEnvManager({ localStorageRef = localStorage, documentRef =
     envToolbarState.fieldsContainer.innerHTML = "";
     envInputs = [];
 
+    const effectiveEnv = getEffectiveEnv(values);
+
     const orderedNames = Array.from(
       new Set([
         ...suggestedNames.map(normalizeEnvName).filter(Boolean),
-        ...Object.keys(values).map(normalizeEnvName).filter(Boolean),
+        ...Object.keys(effectiveEnv).map(normalizeEnvName).filter(Boolean),
       ]),
     );
 
@@ -169,7 +206,7 @@ export function createEnvManager({ localStorageRef = localStorage, documentRef =
 
     orderedNames.forEach((name) => {
       envToolbarState.fieldsContainer.appendChild(
-        createEnvField(name, Object.hasOwn(values, name) ? values[name] : ""),
+        createEnvField(name, Object.hasOwn(effectiveEnv, name) ? effectiveEnv[name] : ""),
       );
     });
   }
