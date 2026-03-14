@@ -22,6 +22,7 @@ Requirements:
 
 - Node.js 18+
 - Docker or Podman
+- ESM-capable runtime (doccurl is now fully ESM)
 
 ## Quick Start
 
@@ -32,7 +33,21 @@ doccurl init my-api-docs
 cd my-api-docs
 ```
 
-2. Add `docs/users.md`:
+2. Start the docs site in development mode:
+
+```bash
+doccurl serve --dev
+```
+
+3. Open `http://localhost:3000`.
+
+4. Use the bundled starter docs:
+
+- `overview.md` for the product tour
+- `playground.md` for the supported curl subset
+- `self-test-api.md` for runnable examples that target DocCurl itself
+
+5. Add your own docs when you are ready:
 
 ````markdown
 # Users API
@@ -43,19 +58,11 @@ curl -X GET $BASE_URL/api/users/123 \\
 ```
 ````
 
-3. Start in development mode:
-
-```bash
-doccurl serve --dev
-```
-
-4. Open `http://localhost:3000`.
-
 ## CLI
 
 ### `doccurl init <projectName>`
 
-Creates a project folder and a `docs/` directory.
+Creates a project folder, a `docs/` directory, and starter Markdown docs.
 
 ### `doccurl serve [options]`
 
@@ -88,6 +95,19 @@ curl -X POST $BASE_URL/api/data \\
 ````
 
 Placeholder variables are discovered from docs and can be managed in the UI. Values are stored in browser `localStorage` under `doccurl.env`.
+
+Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your running DocCurl app URL so the built-in self-test pages can run without another service.
+
+## Built-in Self-Test Docs
+
+New projects ship with runnable docs that exercise DocCurl against itself in `--dev` mode.
+
+- `GET /api/auth/status`
+- `GET /api/docs/tree`
+- `GET /api/docs/content?path=overview.md`
+- `POST /api/run-curl` with a nested curl command
+
+These self-tests are meant for local development without password protection. Login and logout routes are documented, but not fully runnable from the playground because the safe curl subset does not include cookie persistence.
 
 ## Security Model
 
@@ -123,6 +143,18 @@ Example run-curl request:
 npm install
 npm run dev
 npm test
+```
+
+## Project Layout
+
+```txt
+core/      # pure auth/docs domain logic
+engine/    # curl parse/validate/network/runtime/route
+server/    # express app composition and API route wiring
+cli/       # command entrypoint and commands
+frontend/  # browser ESM modules and static UI assets
+docs/      # starter docs copied by `doccurl init`
+test/      # engine/server/frontend test suites
 ```
 
 ## Links
