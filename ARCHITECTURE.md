@@ -52,6 +52,11 @@ doccurl/
       init.js
       serve.js
 
+  docs/
+    overview.md
+    playground.md
+    self-test-api.md
+
   frontend/
     index.html
     main.js
@@ -108,7 +113,7 @@ HTTP transport and app composition only.
 
 Command parsing and process entry only.
 
-- `doccurl init <projectName>` creates project directory with `docs/`.
+- `doccurl init <projectName>` copies starter docs from the packaged `docs/` directory into the new project.
 - `doccurl serve` resolves runtime options and delegates to `startServer`.
 
 ### `frontend/`
@@ -117,7 +122,7 @@ Browser ESM modules by UI responsibility.
 
 - `base-path.js`: mount-path inference and API path helpers.
 - `api.js`: API client wrappers and unauthorized error handling.
-- `env.js`: environment variable storage, placeholder discovery/replacement, env toolbar UI.
+- `env.js`: environment variable storage, placeholder discovery/replacement, and env toolbar UI.
 - `playground.js`: curl editor/formatter/output/fullscreen behavior.
 - `tree.js`: docs tree navigation + doc loading flow.
 - `auth.js`: auth modal behavior and login submit flow.
@@ -154,6 +159,8 @@ Browser ESM modules by UI responsibility.
 
 - `test/engine/`: parser/validator/network/runtime/route behavior.
 - `test/server/`: auth/session/docs access and protection flows.
-- `test/frontend/`: env placeholder + toolbar logic via lightweight DOM mocks.
+- `test/frontend/`: env placeholder/defaulting + toolbar logic via lightweight DOM mocks.
+
+Starter docs are optimized for self-testing in development mode. They document auth endpoints, but only the routes that work without cookie persistence are runnable from the built-in curl playground.
 
 Tests use deterministic startup waits for HTTP servers to avoid `server.address()` race conditions.
