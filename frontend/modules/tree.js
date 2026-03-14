@@ -59,10 +59,15 @@ export function createDocsTreeSystem({
         toggleButton.type = "button";
         toggleButton.className = "docTreeToggle";
         toggleButton.style.paddingLeft = `${13 + depth * 18}px`;
-        toggleButton.innerHTML = `
-          <span class="docTreeCaret">${expanded ? "▾" : "▸"}</span>
-          <span class="docTreeLabel">${node.name}</span>
-        `;
+        const caret = document.createElement("span");
+        caret.className = "docTreeCaret";
+        caret.textContent = expanded ? "▾" : "▸";
+
+        const label = document.createElement("span");
+        label.className = "docTreeLabel";
+        label.textContent = node.name;
+
+        toggleButton.append(caret, label);
 
         if (currentDocPath && currentDocPath.startsWith(`${node.path}/`)) {
           toggleButton.classList.add("active");
