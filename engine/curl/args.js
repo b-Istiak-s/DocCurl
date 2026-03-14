@@ -1,3 +1,8 @@
+import {
+  CURL_RESPONSE_META_END,
+  CURL_RESPONSE_META_START,
+} from "./constants.js";
+
 export function buildCurlArgs(spec) {
   const args = [
     "-sS",
@@ -12,6 +17,8 @@ export function buildCurlArgs(spec) {
     "-X",
     spec.method,
     spec.url,
+    "--write-out",
+    `${CURL_RESPONSE_META_START}%{http_code}\t%{content_type}\t%{time_total}${CURL_RESPONSE_META_END}`,
   ];
 
   for (const header of spec.headers) {

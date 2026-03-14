@@ -65,5 +65,8 @@ export const LIMITS = {
   requestTimeoutMs: 5_000,
 };
 
+export const CURL_RESPONSE_META_START = "__DOCCURL_META_START__";
+export const CURL_RESPONSE_META_END = "__DOCCURL_META_END__";
+
 export const NODOCKER_MARKER_PATH = "/etc/containers/nodocker";
 export const RUNTIME_CHECK_TIMEOUT_MS = 1_500;

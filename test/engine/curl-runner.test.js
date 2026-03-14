@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import net from "node:net";
 import express from "express";
+import {
+  CURL_RESPONSE_META_END,
+  CURL_RESPONSE_META_START,
+} from "../../engine/curl/constants.js";
 
 import {
   setupCurlRoutes,
@@ -251,6 +255,43 @@ test("POST /api/run-curl executes valid parsed command with hardened container a
   assert.ok(calls[0].args.includes("--security-opt=no-new-privileges"));
   assert.ok(calls[0].args.includes("--network=bridge"));
   assert.equal(calls[0].args.includes("--network=host"), false);
+  assert.ok(calls[0].args.includes("--write-out"));
+});
+
+test("POST /api/run-curl returns upstream status, content type, and timing metadata", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: (_command, _args, _options, callback) => {
+        callback(
+          null,
+          `{"ok":true}${CURL_RESPONSE_META_START}201\tapplication/json; charset=utf-8\t0.245${CURL_RESPONSE_META_END}`,
+          "",
+        );
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/ping"' }),
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.equal(data.output, '{"ok":true}');
+      assert.deepEqual(data.metadata, {
+        statusCode: 201,
+        contentType: "application/json; charset=utf-8",
+        durationMs: 245,
+      });
+    },
+  );
+  if (!started) {
+    return;
+  }
 });
 
 test("POST /api/run-curl keeps backward compatibility for legacy payload", async () => {

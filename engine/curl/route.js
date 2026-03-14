@@ -1,11 +1,48 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
-import { LIMITS, NODOCKER_MARKER_PATH } from "./constants.js";
+import {
+  CURL_RESPONSE_META_END,
+  CURL_RESPONSE_META_START,
+  LIMITS,
+  NODOCKER_MARKER_PATH,
+} from "./constants.js";
 import { resolveRequestSpec } from "./parse.js";
 import { validateRequestSpec } from "./validate.js";
 import { defaultDnsLookup, isLocalDevTarget, validateTargetUrl } from "./network.js";
 import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
+
+function parseCurlResponseMetadata(stdout) {
+  const text = String(stdout ?? "");
+  const startIndex = text.lastIndexOf(CURL_RESPONSE_META_START);
+  const endIndex = text.lastIndexOf(CURL_RESPONSE_META_END);
+
+  if (
+    startIndex === -1 ||
+    endIndex === -1 ||
+    endIndex < startIndex + CURL_RESPONSE_META_START.length
+  ) {
+    return {
+      output: text,
+      metadata: null,
+    };
+  }
+
+  const metadataText = text.slice(startIndex + CURL_RESPONSE_META_START.length, endIndex);
+  const [statusCodeRaw = "", contentTypeRaw = "", timeTotalRaw = ""] = metadataText.split("\t");
+
+  const statusCode = Number.parseInt(statusCodeRaw, 10);
+  const durationSeconds = Number.parseFloat(timeTotalRaw);
+
+  return {
+    output: text.slice(0, startIndex),
+    metadata: {
+      statusCode: Number.isFinite(statusCode) ? statusCode : null,
+      contentType: contentTypeRaw || null,
+      durationMs: Number.isFinite(durationSeconds) ? Math.round(durationSeconds * 1000) : null,
+    },
+  };
+}
 
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
@@ -93,9 +130,11 @@ export function setupCurlRoutes(app, options = {}) {
           });
         }
 
+        const result = parseCurlResponseMetadata(stdout);
         return res.json({
           success: true,
-          output: stdout,
+          output: result.output,
+          metadata: result.metadata,
         });
       },
     );
