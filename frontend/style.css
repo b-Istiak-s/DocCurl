@@ -24,6 +24,7 @@
   --curl-editor-font-size: 0.84rem;
   --curl-editor-line-height: 1.7;
   --curl-editor-tab-size: 2;
+  --playground-header-height: 52px;
 }
 
 * {
@@ -357,7 +358,12 @@ body.auth-locked {
 }
 
 .panelHeader {
-  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--playground-header-height);
+  padding: 0 14px;
   background: #f5f8fa;
   border-bottom: 1px solid var(--border);
   font-weight: 700;
@@ -368,10 +374,7 @@ body.auth-locked {
 }
 
 .responseHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: nowrap;
 }
 
 .responseMetaBtn {
@@ -398,7 +401,7 @@ body.auth-locked {
 
 .responseMetaToast {
   position: absolute;
-  top: 52px;
+  top: calc(var(--playground-header-height) + 8px);
   right: 14px;
   z-index: 5;
   width: min(260px, calc(100% - 28px));
