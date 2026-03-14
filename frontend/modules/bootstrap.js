@@ -9,7 +9,9 @@ export async function bootstrapApp() {
   const docList = document.getElementById("docList");
   const docContent = document.getElementById("docContent");
   const mobileMenuButton = document.getElementById("mobileMenuButton");
+  const mobileResetButton = document.getElementById("mobileResetButton");
   const sidebarCloseButton = document.getElementById("sidebarCloseButton");
+  const sidebarResetButton = document.getElementById("sidebarResetButton");
   const sidebarBackdrop = document.getElementById("sidebarBackdrop");
   const fullscreenModal = document.getElementById("fullscreenModal");
   const fullscreenMount = document.getElementById("fullscreenMount");
@@ -22,6 +24,9 @@ export async function bootstrapApp() {
   const authError = document.getElementById("authError");
 
   let authEnabled = false;
+  let featureFlags = {
+    contentCollapse: false,
+  };
 
   function setSidebarOpen(isOpen) {
     document.body.classList.toggle("sidebar-open", isOpen);
@@ -71,6 +76,7 @@ export async function bootstrapApp() {
     envManager,
     playgroundSystem,
     closeSidebar,
+    getFeatures: () => featureFlags,
   });
 
   authController.bindSubmit({
@@ -86,6 +92,12 @@ export async function bootstrapApp() {
     } else {
       openSidebar();
     }
+  });
+
+  [mobileResetButton, sidebarResetButton].forEach((button) => {
+    button.addEventListener("click", () => {
+      playgroundSystem.resetAllDocuments();
+    });
   });
 
   sidebarCloseButton.addEventListener("click", closeSidebar);
@@ -119,6 +131,9 @@ export async function bootstrapApp() {
   try {
     const status = await apiClient.fetchAuthStatus();
     authEnabled = Boolean(status.authEnabled);
+    featureFlags = {
+      contentCollapse: Boolean(status.features?.contentCollapse),
+    };
 
     if (authEnabled && !status.authenticated) {
       authController.showAuthModal("Enter password to unlock this project.");

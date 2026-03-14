@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createDocsTreeSystem } from "../../frontend/modules/tree.js";
+import {
+  applyCollapsedDocumentView,
+  collectCollapsedVisibleElements,
+  createDocsTreeSystem,
+} from "../../frontend/modules/tree.js";
 
 class MockClassList {
   constructor(element) {
@@ -283,7 +287,7 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
     playgroundSystem: {
       hasFullscreenOpen: () => false,
       closeFullscreen() {},
-      resetDocSession() {},
+      resetCurrentDocument() {},
       initializeCurlPlaygrounds() {},
     },
     closeSidebar() {},
@@ -316,4 +320,79 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
     global.document = previousDocument;
     global.window = previousWindow;
   }
+});
+
+test("collapsed document view keeps env controls, headings, and curl blocks visible", () => {
+  const container = new MockElement("div");
+
+  const actionBar = new MockElement("div");
+  actionBar.className = "docActionBar";
+
+  const envBar = new MockElement("div");
+  envBar.className = "docEnvBar";
+
+  const headingOne = new MockElement("h2");
+  headingOne.textContent = "Authentication";
+
+  const intro = new MockElement("p");
+  intro.textContent = "Intro";
+
+  const firstCurl = new MockElement("div");
+  firstCurl.className = "curlPlaygroundInline";
+
+  const detail = new MockElement("p");
+  detail.textContent = "Detail";
+
+  const headingTwo = new MockElement("h3");
+  headingTwo.textContent = "Checks";
+
+  const secondCurl = new MockElement("div");
+  secondCurl.className = "curlPlaygroundInline";
+
+  const closing = new MockElement("p");
+  closing.textContent = "Closing";
+
+  container.append(
+    actionBar,
+    envBar,
+    headingOne,
+    intro,
+    firstCurl,
+    detail,
+    headingTwo,
+    secondCurl,
+    closing,
+  );
+
+  const visibleElements = collectCollapsedVisibleElements(container);
+
+  assert.equal(visibleElements.has(actionBar), true);
+  assert.equal(visibleElements.has(envBar), true);
+  assert.equal(visibleElements.has(headingOne), true);
+  assert.equal(visibleElements.has(firstCurl), true);
+  assert.equal(visibleElements.has(headingTwo), true);
+  assert.equal(visibleElements.has(secondCurl), true);
+  assert.equal(visibleElements.has(intro), false);
+  assert.equal(visibleElements.has(detail), false);
+  assert.equal(visibleElements.has(closing), false);
+
+  applyCollapsedDocumentView(container, true);
+
+  assert.equal(container.classList.contains("docContentCollapsed"), true);
+  assert.equal(actionBar.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(envBar.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(headingOne.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(firstCurl.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(headingTwo.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(secondCurl.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(intro.classList.contains("docContentCollapsedHidden"), true);
+  assert.equal(detail.classList.contains("docContentCollapsedHidden"), true);
+  assert.equal(closing.classList.contains("docContentCollapsedHidden"), true);
+
+  applyCollapsedDocumentView(container, false);
+
+  assert.equal(container.classList.contains("docContentCollapsed"), false);
+  assert.equal(intro.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(detail.classList.contains("docContentCollapsedHidden"), false);
+  assert.equal(closing.classList.contains("docContentCollapsedHidden"), false);
 });

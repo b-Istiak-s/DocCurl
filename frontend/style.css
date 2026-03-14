@@ -59,6 +59,17 @@ body.auth-locked {
   display: none;
 }
 
+.mobileTopbarActions,
+.sidebarHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobileTopbarActions {
+  justify-content: flex-end;
+}
+
 .appTitle {
   font-size: 1rem;
   font-weight: 700;
@@ -118,6 +129,12 @@ body.auth-locked {
 
 .sidebarClose {
   display: none;
+}
+
+.topbarResetButton {
+  padding: 8px 11px;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 #docList {
@@ -219,6 +236,46 @@ body.auth-locked {
   display: grid;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.docActionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+
+.docActionMeta {
+  min-width: 0;
+  color: #526373;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.docActionButtons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.docActionButton {
+  min-width: 112px;
+}
+
+.docContentCollapsedHidden {
+  display: none !important;
 }
 
 .envToolbarHeader {
@@ -788,9 +845,10 @@ body.auth-locked {
     position: sticky;
     top: 0;
     z-index: 60;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
+    gap: 10px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.92);
@@ -854,6 +912,15 @@ body.auth-locked {
 
   .envActions {
     justify-content: stretch;
+  }
+
+  .docActionBar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .docActionButtons {
+    width: 100%;
   }
 
   .secondaryBtn,

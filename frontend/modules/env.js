@@ -219,7 +219,7 @@ export function createEnvManager({
     return Array.from(names);
   }
 
-  function createEnvToolbar(suggestedNames = [], { onReset } = {}) {
+  function createEnvToolbar(suggestedNames = []) {
     const envValues = loadStoredEnv();
     const toolbar = documentRef.createElement("div");
     toolbar.className = "docEnvBar";
@@ -260,13 +260,7 @@ export function createEnvManager({
     addButton.type = "button";
     addButton.textContent = "Add variable";
 
-    const resetButton = documentRef.createElement("button");
-    resetButton.id = "doccurl-reset-all";
-    resetButton.className = "resetBtn";
-    resetButton.type = "button";
-    resetButton.textContent = "Clear all changes";
-
-    actions.append(addButton, resetButton);
+    actions.append(addButton);
     body.append(hint, fieldsContainer, actions);
     toolbar.append(header, body);
     toolbar.classList.add("is-collapsed");
@@ -281,12 +275,6 @@ export function createEnvManager({
       const row = createEnvField();
       envToolbarState.fieldsContainer.appendChild(row);
       persistCurrentEnv();
-    });
-
-    resetButton.addEventListener("click", () => {
-      if (typeof onReset === "function") {
-        onReset();
-      }
     });
 
     toggleButton.addEventListener("click", () => {

@@ -1,3 +1,57 @@
+function isHeadingElement(element) {
+  return /^H[1-6]$/.test(element?.tagName || "");
+}
+
+function isAlwaysVisibleElement(element) {
+  return (
+    element?.classList?.contains("docActionBar") ||
+    element?.classList?.contains("docEnvBar")
+  );
+}
+
+export function collectCollapsedVisibleElements(container) {
+  const children = Array.from(container.children || []);
+  const visibleElements = new Set(children.filter((child) => isAlwaysVisibleElement(child)));
+
+  children.forEach((child, index) => {
+    if (!child?.classList?.contains("curlPlaygroundInline")) {
+      return;
+    }
+
+    visibleElements.add(child);
+
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = children[cursor];
+
+      if (isAlwaysVisibleElement(previous)) {
+        continue;
+      }
+
+      if (isHeadingElement(previous)) {
+        visibleElements.add(previous);
+        break;
+      }
+    }
+  });
+
+  return visibleElements;
+}
+
+export function applyCollapsedDocumentView(container, isCollapsed) {
+  const visibleElements = isCollapsed ? collectCollapsedVisibleElements(container) : null;
+
+  Array.from(container.children || []).forEach((child) => {
+    const shouldHide =
+      isCollapsed &&
+      !isAlwaysVisibleElement(child) &&
+      !visibleElements.has(child);
+
+    child.classList.toggle("docContentCollapsedHidden", shouldHide);
+  });
+
+  container.classList.toggle("docContentCollapsed", Boolean(isCollapsed));
+}
+
 export function createDocsTreeSystem({
   docList,
   docContent,
@@ -7,10 +61,60 @@ export function createDocsTreeSystem({
   envManager,
   playgroundSystem,
   closeSidebar,
+  getFeatures = () => ({}),
 }) {
   const expandedDirs = new Set();
   let docsTree = [];
   let currentDocPath = "";
+  let isContentCollapsed = false;
+
+  function createDocActionBar() {
+    const features = getFeatures() || {};
+    const hasCurlBlocks = docContent.querySelectorAll(".curlPlaygroundInline").length > 0;
+
+    const actionBar = document.createElement("div");
+    actionBar.className = "docActionBar";
+
+    const actionMeta = document.createElement("div");
+    actionMeta.className = "docActionMeta";
+    actionMeta.textContent = currentDocPath ? currentDocPath.replace(/\.md$/, "") : "Document";
+
+    const actions = document.createElement("div");
+    actions.className = "docActionButtons";
+
+    const pageResetButton = document.createElement("button");
+    pageResetButton.type = "button";
+    pageResetButton.className = "secondaryBtn docActionButton";
+    pageResetButton.textContent = "Reset Page";
+    pageResetButton.disabled = !hasCurlBlocks;
+    pageResetButton.addEventListener("click", () => {
+      playgroundSystem.resetCurrentDocument();
+    });
+    actions.appendChild(pageResetButton);
+
+    if (features.contentCollapse) {
+      const collapseToggle = document.createElement("button");
+      collapseToggle.type = "button";
+      collapseToggle.className = "secondaryBtn docActionButton";
+      collapseToggle.disabled = !hasCurlBlocks;
+
+      const syncCollapseToggle = () => {
+        collapseToggle.textContent = isContentCollapsed ? "Show All" : "Focus Curls";
+        collapseToggle.setAttribute("aria-pressed", String(isContentCollapsed));
+      };
+
+      syncCollapseToggle();
+      collapseToggle.addEventListener("click", () => {
+        isContentCollapsed = !isContentCollapsed;
+        applyCollapsedDocumentView(docContent, isContentCollapsed);
+        syncCollapseToggle();
+      });
+      actions.appendChild(collapseToggle);
+    }
+
+    actionBar.append(actionMeta, actions);
+    return actionBar;
+  }
 
   function expandPathAncestors(filePath) {
     const parts = filePath.split("/");
@@ -149,12 +253,15 @@ export function createDocsTreeSystem({
       docContent.innerHTML = data.html || "";
 
       const placeholderNames = envManager.collectPlaceholderNamesFromDocument(docContent);
-      docContent.prepend(
-        envManager.createEnvToolbar(placeholderNames, {
-          onReset: playgroundSystem.resetDocSession,
-        }),
-      );
-      playgroundSystem.initializeCurlPlaygrounds();
+      playgroundSystem.initializeCurlPlaygrounds(docPath);
+      isContentCollapsed = false;
+
+      const envToolbar = envManager.createEnvToolbar(placeholderNames);
+      const actionBar = createDocActionBar();
+
+      docContent.prepend(envToolbar);
+      docContent.prepend(actionBar);
+      applyCollapsedDocumentView(docContent, false);
 
       if (window.matchMedia("(max-width: 960px)").matches) {
         closeSidebar();
