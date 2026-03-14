@@ -17,6 +17,7 @@ export function startServer(port = 3000, projectName, options = {}) {
     : path.join(__dirname, projectName);
 
   const isDev = Boolean(options.dev);
+  const collapse = Boolean(options.collapse);
   const configuredPassword = typeof options.password === "string" ? options.password : "";
   const frontendDir = options.frontendDir || path.resolve(__dirname, "../frontend");
   const host = typeof options.host === "string" && options.host ? options.host : undefined;
@@ -28,6 +29,9 @@ export function startServer(port = 3000, projectName, options = {}) {
     frontendDir,
     curlRouteOptions: options.curlRouteOptions || {},
     docsRouteOptions: options.docsRouteOptions || {},
+    features: {
+      contentCollapse: collapse,
+    },
   });
 
   const server = app.listen(effectivePort, host, () => {

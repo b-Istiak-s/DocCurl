@@ -15,6 +15,7 @@ export function createApp({
   frontendDir,
   curlRouteOptions = {},
   docsRouteOptions = {},
+  features = {},
 }) {
   const authEnabled = isDev ? configuredPassword.length > 0 : true;
   if (!isDev && configuredPassword.length === 0) {
@@ -43,6 +44,7 @@ export function createApp({
     isAuthenticated,
     configuredPassword,
     sessionSecret,
+    features,
   });
 
   app.use("/api", createAuthRequiredMiddleware({ authEnabled, isAuthenticated }));
