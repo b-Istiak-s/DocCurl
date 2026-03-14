@@ -47,7 +47,10 @@ function closeServer(server) {
   });
 }
 
-async function withServer({ docsDir, dev = false, password = "" }, run) {
+async function withServer(
+  { docsDir, dev = false, password = "", curlRouteOptions = {}, docsRouteOptions = {} },
+  run,
+) {
   if (!portsChecked) {
     portsChecked = true;
     portsBlocked = !(await checkPortBinding());
@@ -63,7 +66,13 @@ async function withServer({ docsDir, dev = false, password = "" }, run) {
 
   let server;
   try {
-    server = startServer(0, docsDir, { dev, password, host: "127.0.0.1" });
+    server = startServer(0, docsDir, {
+      dev,
+      password,
+      host: "127.0.0.1",
+      curlRouteOptions,
+      docsRouteOptions,
+    });
   } catch (error) {
     if (error.code === "EPERM") {
       portsBlocked = true;
@@ -197,6 +206,72 @@ test("path traversal is rejected for docs content endpoint", async () => {
     if (!started) {
       return;
     }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("missing docs content returns 404", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true },
+      async ({ baseUrl }) => {
+        const response = await fetch(
+          `${baseUrl}/api/docs/content?path=${encodeURIComponent("missing.md")}`,
+        );
+        const payload = await response.json();
+
+        assert.equal(response.status, 404);
+        assert.equal(payload.error, "File not found");
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("unreadable docs content returns 500 and logs the underlying error", async () => {
+  const docsDir = createTempDocs();
+  const loggedErrors = [];
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: true,
+        docsRouteOptions: {
+          fsReadFile: (_filePath, _encoding, callback) => {
+            const error = new Error("permission denied");
+            error.code = "EACCES";
+            callback(error);
+          },
+          logger: {
+            error: (...args) => loggedErrors.push(args),
+          },
+        },
+      },
+      async ({ baseUrl }) => {
+        const response = await fetch(
+          `${baseUrl}/api/docs/content?path=${encodeURIComponent("page.md")}`,
+        );
+        const payload = await response.json();
+
+        assert.equal(response.status, 500);
+        assert.equal(payload.error, "Unable to read document");
+      },
+    );
+    if (!started) {
+      return;
+    }
+
+    assert.equal(loggedErrors.length, 1);
+    assert.equal(loggedErrors[0][0], "Unable to read document");
+    assert.equal(loggedErrors[0][1].code, "EACCES");
+    assert.match(loggedErrors[0][1].path, /page\.md$/);
   } finally {
     fs.rmSync(docsDir, { recursive: true, force: true });
   }

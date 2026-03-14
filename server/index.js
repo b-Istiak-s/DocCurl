@@ -27,6 +27,7 @@ export function startServer(port = 3000, projectName, options = {}) {
     configuredPassword,
     frontendDir,
     curlRouteOptions: options.curlRouteOptions || {},
+    docsRouteOptions: options.docsRouteOptions || {},
   });
 
   const server = app.listen(effectivePort, host, () => {

@@ -8,7 +8,14 @@ import { registerDocsRoutes } from "./routes/docs.js";
 import { registerCurlRoutes } from "./routes/curl.js";
 import { createAuthRequiredMiddleware } from "./middleware/auth-required.js";
 
-export function createApp({ docsDir, isDev = false, configuredPassword = "", frontendDir, curlRouteOptions = {} }) {
+export function createApp({
+  docsDir,
+  isDev = false,
+  configuredPassword = "",
+  frontendDir,
+  curlRouteOptions = {},
+  docsRouteOptions = {},
+}) {
   const authEnabled = isDev ? configuredPassword.length > 0 : true;
   if (!isDev && configuredPassword.length === 0) {
     throw new Error("Production mode requires --password");
@@ -48,6 +55,7 @@ export function createApp({ docsDir, isDev = false, configuredPassword = "", fro
   registerDocsRoutes(app, {
     docsDir,
     markdownRenderer,
+    ...docsRouteOptions,
   });
 
   app.get("/", (_req, res) => {
