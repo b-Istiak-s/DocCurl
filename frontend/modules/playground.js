@@ -1,5 +1,128 @@
 import { replacePlaceholders } from "./env.js";
 
+const STORAGE_KEYS = {
+  curlEdits: "doccurl.curlEdits.v1",
+};
+
+function hashString(value) {
+  let hash = 2166136261;
+  const input = String(value || "");
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+function normalizeStoredCurlEdits(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized = {};
+
+  for (const [docPath, entries] of Object.entries(value)) {
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+      continue;
+    }
+
+    const normalizedEntries = {};
+    for (const [blockId, command] of Object.entries(entries)) {
+      if (!blockId || typeof command !== "string") {
+        continue;
+      }
+      normalizedEntries[blockId] = command;
+    }
+
+    if (Object.keys(normalizedEntries).length > 0) {
+      normalized[String(docPath)] = normalizedEntries;
+    }
+  }
+
+  return normalized;
+}
+
+export function loadStoredCurlEdits(localStorageRef = localStorage) {
+  const rawValue = localStorageRef.getItem(STORAGE_KEYS.curlEdits);
+  if (!rawValue) {
+    return {};
+  }
+
+  try {
+    return normalizeStoredCurlEdits(JSON.parse(rawValue));
+  } catch {
+    return {};
+  }
+}
+
+function persistStoredCurlEdits(edits, localStorageRef = localStorage) {
+  localStorageRef.setItem(
+    STORAGE_KEYS.curlEdits,
+    JSON.stringify(normalizeStoredCurlEdits(edits)),
+  );
+}
+
+export function createStableCurlBlockId(docPath, blockIndex, originalCommand) {
+  const normalizedCommand = formatCurlCommand(originalCommand) || String(originalCommand || "").trim();
+  return `curl-${blockIndex}-${hashString(`${docPath}\n${normalizedCommand}`)}`;
+}
+
+export function getStoredCurlEdit(docPath, blockId, localStorageRef = localStorage) {
+  const edits = loadStoredCurlEdits(localStorageRef);
+  return edits[docPath]?.[blockId] || "";
+}
+
+export function saveStoredCurlEdit(
+  docPath,
+  blockId,
+  command,
+  originalCommand,
+  localStorageRef = localStorage,
+) {
+  const edits = loadStoredCurlEdits(localStorageRef);
+  const normalizedCommand = String(command || "");
+  const normalizedOriginal = String(originalCommand || "");
+
+  if (!docPath || !blockId) {
+    return edits;
+  }
+
+  if (!normalizedCommand || normalizedCommand === normalizedOriginal) {
+    if (edits[docPath]) {
+      delete edits[docPath][blockId];
+      if (Object.keys(edits[docPath]).length === 0) {
+        delete edits[docPath];
+      }
+      persistStoredCurlEdits(edits, localStorageRef);
+    }
+    return edits;
+  }
+
+  edits[docPath] = edits[docPath] || {};
+  edits[docPath][blockId] = normalizedCommand;
+  persistStoredCurlEdits(edits, localStorageRef);
+  return edits;
+}
+
+export function clearStoredCurlEditsForDocument(docPath, localStorageRef = localStorage) {
+  const edits = loadStoredCurlEdits(localStorageRef);
+
+  if (!docPath || !edits[docPath]) {
+    return edits;
+  }
+
+  delete edits[docPath];
+  persistStoredCurlEdits(edits, localStorageRef);
+  return edits;
+}
+
+export function clearAllStoredCurlEdits(localStorageRef = localStorage) {
+  persistStoredCurlEdits({}, localStorageRef);
+  return {};
+}
+
 export function tokenizeShell(input) {
   const tokens = [];
   let current = "";
@@ -376,7 +499,7 @@ function formatResponseDuration(durationMs) {
 
 function hideResponseMetaToast(state) {
   if (state.responseMetaTimeoutId) {
-    window.clearTimeout(state.responseMetaTimeoutId);
+    state.windowRef.clearTimeout(state.responseMetaTimeoutId);
     state.responseMetaTimeoutId = null;
   }
   state.responseMetaToast.classList.remove("is-visible");
@@ -395,18 +518,18 @@ function renderResponseMetaToast(state) {
     ["Time", formatResponseDuration(metadata.durationMs)],
   ];
 
-  const titleElement = document.createElement("div");
+  const titleElement = state.documentRef.createElement("div");
   titleElement.className = "responseMetaToastTitle";
   titleElement.textContent = "Response Details";
 
-  const listElement = document.createElement("dl");
+  const listElement = state.documentRef.createElement("dl");
   listElement.className = "responseMetaToastList";
 
   items.forEach(([label, value]) => {
-    const term = document.createElement("dt");
+    const term = state.documentRef.createElement("dt");
     term.textContent = label;
 
-    const description = document.createElement("dd");
+    const description = state.documentRef.createElement("dd");
     description.textContent = value;
 
     listElement.append(term, description);
@@ -424,10 +547,10 @@ function showResponseMetaToast(state) {
   state.responseMetaToast.classList.add("is-visible");
 
   if (state.responseMetaTimeoutId) {
-    window.clearTimeout(state.responseMetaTimeoutId);
+    state.windowRef.clearTimeout(state.responseMetaTimeoutId);
   }
 
-  state.responseMetaTimeoutId = window.setTimeout(() => {
+  state.responseMetaTimeoutId = state.windowRef.setTimeout(() => {
     state.responseMetaToast.classList.remove("is-visible");
     state.responseMetaTimeoutId = null;
   }, 5000);
@@ -495,24 +618,47 @@ export function createPlaygroundSystem({
   parseJsonSafe,
   withBasePath,
   envManager,
+  localStorageRef = localStorage,
+  documentRef = document,
+  windowRef = window,
 }) {
   const playgroundStates = new Map();
   let playgroundCounter = 0;
   let fullscreenState = null;
+  let currentDocPath = "";
+  const bodyElement = documentRef.body || document.body;
+
+  function persistEditorValue(state) {
+    saveStoredCurlEdit(
+      state.docPath,
+      state.blockId,
+      state.editorElement.value,
+      state.originalTemplate,
+      localStorageRef,
+    );
+  }
+
+  function resetVisiblePlaygroundState(state) {
+    state.editorElement.value = state.originalTemplate;
+    syncCurlOverlay(state, { highlight: true });
+    syncCurlOverlayScroll(state);
+    setResponseMetadata(state, null);
+    renderEmpty(state.outputElement);
+  }
 
   function openFullscreen(playgroundElement) {
     if (fullscreenState) {
       closeFullscreen();
     }
 
-    const placeholder = document.createElement("div");
+    const placeholder = documentRef.createElement("div");
     placeholder.className = "fullscreenPlaceholder";
     playgroundElement.after(placeholder);
     fullscreenMount.appendChild(playgroundElement);
 
     fullscreenState = { playgroundElement, placeholder };
     fullscreenModal.hidden = false;
-    document.body.classList.add("fullscreen-open");
+    bodyElement.classList.add("fullscreen-open");
   }
 
   function closeFullscreen() {
@@ -526,7 +672,7 @@ export function createPlaygroundSystem({
     }
     fullscreenState = null;
     fullscreenModal.hidden = true;
-    document.body.classList.remove("fullscreen-open");
+    bodyElement.classList.remove("fullscreen-open");
   }
 
   async function runCurlCommand(command, state) {
@@ -562,13 +708,16 @@ export function createPlaygroundSystem({
     }
   }
 
-  function createPlayground(curlCommand) {
+  function createPlayground(curlCommand, { docPath, blockIndex }) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
+    const originalTemplate = formatCurlCommand(curlCommand);
+    const blockId = createStableCurlBlockId(docPath, blockIndex, originalTemplate);
 
-    const playground = document.createElement("div");
+    const playground = documentRef.createElement("div");
     playground.className = "curlPlaygroundInline";
     playground.dataset.playgroundId = playgroundId;
+    playground.dataset.curlBlockId = blockId;
     playground.innerHTML = `
       <section class="playgroundPane">
         <div class="panelHeader">Request</div>
@@ -606,12 +755,13 @@ export function createPlaygroundSystem({
     const responseMetaToast = playground.querySelector(".responseMetaToast");
     const runButton = playground.querySelector(".runBtn");
     const fullscreenButton = playground.querySelector(".fullscreenBtn");
-
-    const originalTemplate = formatCurlCommand(curlCommand);
-    editorElement.value = originalTemplate;
+    const storedValue = getStoredCurlEdit(docPath, blockId, localStorageRef);
+    editorElement.value = storedValue || originalTemplate;
 
     const state = {
       playgroundElement: playground,
+      docPath,
+      blockId,
       editorElement,
       editorShell,
       overlayElement,
@@ -624,6 +774,8 @@ export function createPlaygroundSystem({
       originalTemplate,
       responseMetadata: null,
       responseMetaTimeoutId: null,
+      documentRef,
+      windowRef,
     };
     playgroundStates.set(playgroundId, state);
 
@@ -634,6 +786,7 @@ export function createPlaygroundSystem({
     editorElement.addEventListener("input", () => {
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
+      persistEditorValue(state);
     });
 
     editorElement.addEventListener("scroll", () => {
@@ -644,6 +797,7 @@ export function createPlaygroundSystem({
       prettifyTextareaCommand(state);
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
+      persistEditorValue(state);
     });
 
     runButton.addEventListener("click", async () => {
@@ -664,31 +818,47 @@ export function createPlaygroundSystem({
     return playground;
   }
 
-  function resetDocSession() {
+  function resetCurrentDocument() {
     if (fullscreenState) {
       closeFullscreen();
     }
 
-    envManager.persistEnv({});
-    envManager.renderEnvFields({}, envManager.getSuggestedNames());
+    clearStoredCurlEditsForDocument(currentDocPath, localStorageRef);
 
     for (const state of playgroundStates.values()) {
-      state.editorElement.value = state.originalTemplate;
-      syncCurlOverlay(state, { highlight: true });
-      syncCurlOverlayScroll(state);
-      setResponseMetadata(state, null);
-      renderEmpty(state.outputElement);
+      if (state.docPath === currentDocPath) {
+        resetVisiblePlaygroundState(state);
+      }
     }
   }
 
-  function initializeCurlPlaygrounds() {
+  function resetAllDocuments() {
+    if (fullscreenState) {
+      closeFullscreen();
+    }
+
+    clearAllStoredCurlEdits(localStorageRef);
+
+    for (const state of playgroundStates.values()) {
+      resetVisiblePlaygroundState(state);
+    }
+  }
+
+  function initializeCurlPlaygrounds(docPath) {
+    for (const state of playgroundStates.values()) {
+      hideResponseMetaToast(state);
+    }
     playgroundStates.clear();
+    currentDocPath = docPath;
     const codeBlocks = docContent.querySelectorAll("pre code.language-curl");
 
-    codeBlocks.forEach((block) => {
+    codeBlocks.forEach((block, blockIndex) => {
       const curlCommand = block.textContent.trim();
       const preElement = block.parentElement;
-      const playground = createPlayground(curlCommand);
+      const playground = createPlayground(curlCommand, {
+        docPath,
+        blockIndex,
+      });
       preElement.replaceWith(playground);
     });
   }
@@ -696,10 +866,14 @@ export function createPlaygroundSystem({
   return {
     closeFullscreen,
     openFullscreen,
-    resetDocSession,
+    resetCurrentDocument,
+    resetAllDocuments,
     initializeCurlPlaygrounds,
     hasFullscreenOpen() {
       return Boolean(fullscreenState);
+    },
+    getCurrentDocPath() {
+      return currentDocPath;
     },
   };
 }
