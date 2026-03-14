@@ -71,6 +71,7 @@ Options:
 - `-p, --port <port>`: Server port. Default `3000`.
 - `-d, --dir <dir>`: Docs directory. Default `docs`.
 - `--dev`: Development mode (allows localhost/private targets).
+- `--collapse`: Enables the `Focus Curls` toggle in the docs UI.
 - `--password <password>`: Enables auth. Required in non-dev mode.
 
 Examples:
@@ -95,6 +96,8 @@ curl -X POST $BASE_URL/api/data \\
 ````
 
 Placeholder variables are discovered from docs and can be managed in the UI. Values are stored in browser `localStorage` under `doccurl.env`.
+
+Edited curl blocks are stored separately in browser `localStorage` under `doccurl.curlEdits.v1`, scoped by document path and curl block ID. Users can reset either the current page’s curl edits or all saved curl edits from the docs UI without affecting env vars.
 
 Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your running DocCurl app URL so the built-in self-test pages can run without another service.
 
