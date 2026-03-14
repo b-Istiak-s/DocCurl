@@ -6,9 +6,9 @@
   --muted: #5e6b77;
   --border: #d8dee5;
   --shadow: 0 12px 30px rgba(10, 34, 57, 0.08);
-  --sidebar-bg: linear-gradient(180deg, #0d2f3d 0%, #123846 100%);
-  --sidebar-text: #d5ecf2;
-  --sidebar-text-strong: #f2feff;
+  --sidebar-bg: #0f1520;
+  --sidebar-text: #8b9bb4;
+  --sidebar-text-strong: #e2e8f0;
   --run-a: #15b7a7;
   --run-b: #1dbb73;
   --run-shadow: 0 10px 20px rgba(22, 179, 128, 0.32);
@@ -98,13 +98,9 @@ body.auth-locked {
   justify-content: space-between;
   gap: 12px;
   padding: 20px 18px;
-  background: linear-gradient(
-    180deg,
-    rgba(5, 24, 31, 0.65) 0%,
-    rgba(5, 24, 31, 0.1) 100%
-  );
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(15, 21, 32, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   z-index: 2;
 }
 
@@ -143,28 +139,51 @@ body.auth-locked {
 
 .docTreeToggle,
 .docListButton {
+  display: flex;
+  align-items: center;
   width: 100%;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--sidebar-text);
-  border-radius: 10px;
+  border-radius: 8px;
   text-align: left;
-  padding: 11px 13px;
+  padding: 8px 10px;
   font-size: 0.94rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .docTreeToggle {
+  gap: 8px;
+}
+
+.docListButton {
+  gap: 8px;
+}
+
+.docTreeLabel {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.docIcon {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  color: #64748b;
+  transition: color 0.15s ease;
 }
 
 .docTreeCaret {
   width: 14px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  transition: color 0.15s ease;
 }
 
 .docTreeFileButton {
@@ -174,20 +193,33 @@ body.auth-locked {
 .docTreeToggle:hover,
 .docListButton:hover {
   transform: translateX(3px);
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--sidebar-text-strong);
+}
+
+.docTreeToggle:hover .docIcon,
+.docTreeToggle:hover .docTreeCaret,
+.docListButton:hover .docIcon {
+  color: #94a3b8;
 }
 
 .docListButton.active {
-  color: #0d2f3d;
-  border-color: rgba(255, 255, 255, 0.95);
-  background: linear-gradient(135deg, #d6fff8 0%, #c8fbdf 100%);
-  font-weight: 600;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.docListButton.active .docIcon {
+  color: #3b82f6;
 }
 
 .docTreeToggle.active {
-  border-color: rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.22);
+  color: var(--sidebar-text-strong);
+}
+
+.docTreeToggle.active .docIcon,
+.docTreeToggle.active .docTreeCaret {
+  color: #cbd5e1;
 }
 
 #sidebarBackdrop {
