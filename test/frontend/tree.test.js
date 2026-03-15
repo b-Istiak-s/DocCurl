@@ -294,22 +294,43 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
 
     const toggleButton = docList.querySelector(".docTreeToggle");
     assert.ok(toggleButton);
-    assert.equal(toggleButton.children.length, 2);
+    assert.equal(toggleButton.children.length, 3);
 
     const caret = toggleButton.querySelector(".docTreeCaret");
+    const folderIcon = toggleButton.querySelector(".folderIcon");
     const label = toggleButton.querySelector(".docTreeLabel");
     assert.ok(caret);
+    assert.ok(folderIcon);
     assert.ok(label);
-    assert.equal(caret.textContent, "▾");
+    assert.equal(caret.getAttribute("aria-hidden"), "true");
+    assert.match(caret.innerHTML, /aria-hidden="true"/);
+    assert.match(caret.innerHTML, /focusable="false"/);
+    assert.equal(folderIcon.getAttribute("aria-hidden"), "true");
+    assert.match(folderIcon.innerHTML, /aria-hidden="true"/);
+    assert.match(folderIcon.innerHTML, /focusable="false"/);
     assert.equal(label.textContent, maliciousName);
     assert.equal(label.children.length, 0);
     assert.equal(toggleButton.querySelector("img"), null);
+
+    const fileButton = docList.querySelector(".docTreeFileButton");
+    const fileIcon = fileButton?.querySelector(".fileIcon");
+    const fileLabel = fileButton?.querySelector(".docTreeLabel");
+    assert.ok(fileButton);
+    assert.ok(fileIcon);
+    assert.ok(fileLabel);
+    assert.equal(fileIcon.getAttribute("aria-hidden"), "true");
+    assert.match(fileIcon.innerHTML, /aria-hidden="true"/);
+    assert.match(fileIcon.innerHTML, /focusable="false"/);
+    assert.equal(fileLabel.textContent, "page");
+    assert.equal(fileButton.querySelector("img"), null);
 
     toggleButton.click();
     assert.equal(docList.querySelector(".docTreeChildren"), null);
 
     const rerenderedToggle = docList.querySelector(".docTreeToggle");
     assert.ok(rerenderedToggle);
+    assert.equal(rerenderedToggle.querySelector(".docTreeCaret")?.getAttribute("aria-hidden"), "true");
+    assert.equal(rerenderedToggle.querySelector(".folderIcon")?.getAttribute("aria-hidden"), "true");
     rerenderedToggle.click();
     assert.ok(docList.querySelector(".docTreeChildren"));
   } finally {

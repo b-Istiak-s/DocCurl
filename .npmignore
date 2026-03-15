@@ -1,4 +1,5 @@
-docs/
+/docs/
+.env
 AUDIT_SUMMARY.md
 ISSUES_CHECKLIST.md
 SECURITY_AUDIT_INDEX.md
