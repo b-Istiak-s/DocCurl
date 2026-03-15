@@ -111,7 +111,7 @@ export function saveStoredCurlEdit(
     return edits;
   }
 
-  edits[docPath] = edits[docPath] || {};
+  edits[docPath] = edits[docPath] || Object.create(null);
   edits[docPath][blockId] = normalizedCommand;
   persistStoredCurlEdits(edits, localStorageRef);
   return edits;
