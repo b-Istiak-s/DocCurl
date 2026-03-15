@@ -10,31 +10,45 @@ function isAlwaysVisibleElement(element) {
 }
 
 export function collectCollapsedVisibleElements(container) {
-  const children = Array.from(container.children || []);
-  const visibleElements = new Set(
-    children.filter((child) => isAlwaysVisibleElement(child)),
-  );
+  const visibleElements = new Set();
+  let lastHeading = null;
 
-  children.forEach((child, index) => {
-    if (!child?.classList?.contains("curlPlaygroundInline")) {
+  function addElementAndAncestors(element) {
+    if (!element) {
       return;
     }
 
-    visibleElements.add(child);
+    visibleElements.add(element);
 
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const previous = children[cursor];
-
-      if (isAlwaysVisibleElement(previous)) {
-        continue;
-      }
-
-      if (isHeadingElement(previous)) {
-        visibleElements.add(previous);
-        break;
-      }
+    let ancestor = element.parentElement;
+    while (ancestor && ancestor !== container) {
+      visibleElements.add(ancestor);
+      ancestor = ancestor.parentElement;
     }
-  });
+  }
+
+  function walk(node) {
+    Array.from(node.children || []).forEach((child) => {
+      if (isAlwaysVisibleElement(child)) {
+        visibleElements.add(child);
+      }
+
+      if (child?.classList?.contains("curlPlaygroundInline")) {
+        addElementAndAncestors(child);
+        if (lastHeading) {
+          addElementAndAncestors(lastHeading);
+        }
+      }
+
+      if (isHeadingElement(child)) {
+        lastHeading = child;
+      }
+
+      walk(child);
+    });
+  }
+
+  walk(container);
 
   return visibleElements;
 }
@@ -44,14 +58,24 @@ export function applyCollapsedDocumentView(container, isCollapsed) {
     ? collectCollapsedVisibleElements(container)
     : null;
 
-  Array.from(container.children || []).forEach((child) => {
-    const shouldHide =
-      isCollapsed &&
-      !isAlwaysVisibleElement(child) &&
-      !visibleElements.has(child);
+  function walk(node, preserveSubtree = false) {
+    Array.from(node.children || []).forEach((child) => {
+      const shouldPreserveSubtree =
+        preserveSubtree ||
+        (visibleElements?.has(child) && isHeadingElement(child)) ||
+        isAlwaysVisibleElement(child) ||
+        child?.classList?.contains("curlPlaygroundInline");
+      const shouldHide =
+        isCollapsed &&
+        !shouldPreserveSubtree &&
+        !visibleElements.has(child);
 
-    child.classList.toggle("docContentCollapsedHidden", shouldHide);
-  });
+      child.classList.toggle("docContentCollapsedHidden", shouldHide);
+      walk(child, shouldPreserveSubtree);
+    });
+  }
+
+  walk(container);
 
   container.classList.toggle("docContentCollapsed", Boolean(isCollapsed));
 }
