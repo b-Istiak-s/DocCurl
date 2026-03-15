@@ -3,6 +3,7 @@ import { replacePlaceholders } from "./env.js";
 const STORAGE_KEYS = {
   curlEdits: "doccurl.curlEdits.v1",
 };
+const RESERVED_STORAGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function hashString(value) {
   let hash = 2166136261;
@@ -18,26 +19,36 @@ function hashString(value) {
 
 function normalizeStoredCurlEdits(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
+    return Object.create(null);
   }
 
-  const normalized = {};
+  const normalized = Object.create(null);
 
   for (const [docPath, entries] of Object.entries(value)) {
     if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
       continue;
     }
 
-    const normalizedEntries = {};
+    const docKey = String(docPath);
+    if (!docKey || RESERVED_STORAGE_KEYS.has(docKey)) {
+      continue;
+    }
+
+    const normalizedEntries = Object.create(null);
     for (const [blockId, command] of Object.entries(entries)) {
-      if (!blockId || typeof command !== "string") {
+      const entryKey = String(blockId);
+      if (
+        !entryKey ||
+        RESERVED_STORAGE_KEYS.has(entryKey) ||
+        typeof command !== "string"
+      ) {
         continue;
       }
-      normalizedEntries[blockId] = command;
+      normalizedEntries[entryKey] = command;
     }
 
     if (Object.keys(normalizedEntries).length > 0) {
-      normalized[String(docPath)] = normalizedEntries;
+      normalized[docKey] = normalizedEntries;
     }
   }
 
@@ -47,13 +58,13 @@ function normalizeStoredCurlEdits(value) {
 export function loadStoredCurlEdits(localStorageRef = localStorage) {
   const rawValue = localStorageRef.getItem(STORAGE_KEYS.curlEdits);
   if (!rawValue) {
-    return {};
+    return Object.create(null);
   }
 
   try {
     return normalizeStoredCurlEdits(JSON.parse(rawValue));
   } catch {
-    return {};
+    return Object.create(null);
   }
 }
 
@@ -119,8 +130,9 @@ export function clearStoredCurlEditsForDocument(docPath, localStorageRef = local
 }
 
 export function clearAllStoredCurlEdits(localStorageRef = localStorage) {
-  persistStoredCurlEdits({}, localStorageRef);
-  return {};
+  const emptyEdits = Object.create(null);
+  persistStoredCurlEdits(emptyEdits, localStorageRef);
+  return emptyEdits;
 }
 
 export function tokenizeShell(input) {

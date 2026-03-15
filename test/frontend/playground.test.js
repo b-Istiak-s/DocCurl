@@ -370,6 +370,10 @@ function createWindow() {
   };
 }
 
+function createNullProtoObject(value) {
+  return Object.assign(Object.create(null), value);
+}
+
 function createCurlBlock(command) {
   const preElement = new MockElement("pre");
   const codeElement = new MockElement("code");
@@ -510,6 +514,8 @@ test("page reset clears only the active document curl edits and keeps env values
     editor.dispatch("blur");
 
     const storedAfterEdit = loadStoredCurlEdits(localStorageRef);
+    assert.equal(Object.getPrototypeOf(storedAfterEdit), null);
+    assert.equal(Object.getPrototypeOf(storedAfterEdit["page-a.md"]), null);
     assert.equal(
       storedAfterEdit["page-a.md"][blockId],
       formatCurlCommand("curl https://blurred.example.com/account"),
@@ -520,11 +526,11 @@ test("page reset clears only the active document curl edits and keeps env values
 
     assert.equal(editor.value, originalTemplate);
     assert.ok(output.querySelector(".outputEmpty"));
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), {
-      "page-b.md": {
+    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({
+      "page-b.md": createNullProtoObject({
         "curl-keep": "curl https://keep.example.com",
-      },
-    });
+      }),
+    }));
     assert.deepEqual(JSON.parse(localStorageRef.getItem("doccurl.env")), {
       API_TOKEN: "secret-token",
     });
@@ -589,15 +595,46 @@ test("global reset clears all stored curl edits without touching env values", ()
     playgroundSystem.resetAllDocuments();
 
     assert.equal(editor.value, originalTemplate);
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), {});
+    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({}));
     assert.deepEqual(JSON.parse(localStorageRef.getItem("doccurl.env")), {
       BASE_URL: "https://api.example.com",
     });
 
     clearAllStoredCurlEdits(localStorageRef);
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), {});
+    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({}));
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
   }
+});
+
+test("loadStoredCurlEdits drops reserved keys and returns null-prototype maps", () => {
+  const localStorageRef = createLocalStorage({
+    "doccurl.curlEdits.v1": JSON.stringify({
+      "__proto__": {
+        polluted: "nope",
+      },
+      "page-a.md": {
+        "__proto__": "ignore",
+        constructor: "ignore",
+        prototype: "ignore",
+        "curl-safe": "curl https://api.example.com/safe",
+      },
+      constructor: {
+        "curl-bad": "curl https://api.example.com/bad",
+      },
+    }),
+  });
+
+  const edits = loadStoredCurlEdits(localStorageRef);
+
+  assert.equal(Object.getPrototypeOf(edits), null);
+  assert.equal(Object.getPrototypeOf(edits["page-a.md"]), null);
+  assert.deepEqual(edits, createNullProtoObject({
+    "page-a.md": createNullProtoObject({
+      "curl-safe": "curl https://api.example.com/safe",
+    }),
+  }));
+  assert.equal(edits.__proto__, undefined);
+  assert.equal(edits.constructor, undefined);
 });
