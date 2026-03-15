@@ -123,8 +123,8 @@ Browser ESM modules by UI responsibility.
 - `base-path.js`: mount-path inference and API path helpers.
 - `api.js`: API client wrappers and unauthorized error handling.
 - `env.js`: environment variable storage, placeholder discovery/replacement, and env toolbar UI.
-- `playground.js`: curl editor/formatter/output/fullscreen behavior.
-- `tree.js`: docs tree navigation + doc loading flow.
+- `playground.js`: curl editor/formatter/output/fullscreen behavior, stable curl block IDs, and local curl-edit persistence/reset operations.
+- `tree.js`: docs tree navigation, document action bar flow, and optional curl-focused collapsed view.
 - `auth.js`: auth modal behavior and login submit flow.
 - `bootstrap.js`: wiring and app startup orchestration.
 
@@ -134,9 +134,11 @@ Browser ESM modules by UI responsibility.
 2. Server composes Express app and static frontend.
 3. Frontend bootstraps:
    - Fetches `/api/auth/status`.
+   - Reads additive feature flags such as `features.contentCollapse`.
    - Loads docs tree and first document.
    - Discovers placeholders and renders env toolbar.
-   - Converts curl markdown blocks into interactive playgrounds.
+   - Converts curl markdown blocks into interactive playgrounds with stable per-block IDs.
+   - Restores saved curl edits from browser storage (`doccurl.curlEdits.v1`).
 4. On run:
    - Frontend resolves placeholders from `doccurl.env` values.
    - Sends command to `/api/run-curl`.

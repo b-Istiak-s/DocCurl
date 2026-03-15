@@ -5,11 +5,23 @@ import {
   createSessionToken,
 } from "../../core/auth/session.js";
 
-export function registerAuthRoutes(app, { authEnabled, isAuthenticated, configuredPassword, sessionSecret }) {
+export function registerAuthRoutes(
+  app,
+  {
+    authEnabled,
+    isAuthenticated,
+    configuredPassword,
+    sessionSecret,
+    features = {},
+  },
+) {
   app.get("/api/auth/status", (req, res) => {
     res.json({
       authEnabled,
       authenticated: isAuthenticated(req),
+      features: {
+        contentCollapse: Boolean(features.contentCollapse),
+      },
     });
   });
 

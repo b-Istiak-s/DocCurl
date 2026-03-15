@@ -1,13 +1,13 @@
 {
   "name": "doccurl",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Interactive curl command documentation viewer with live playground",
   "main": "server/index.js",
   "bin": {
     "doccurl": "cli/index.js"
   },
   "scripts": {
-    "dev": "npx nodemon -e js,json,html,css,md -x \"node cli/index.js serve --port 3000 --dir docs --dev\"",
+    "dev": "npx nodemon -e js,json,html,css,md -x \"node cli/index.js serve --port 3000 --dir docs --dev --collapse\"",
     "start": "node cli/index.js serve --port 3000 --dir docs",
     "test": "node --test"
   },

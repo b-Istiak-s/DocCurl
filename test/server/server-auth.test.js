@@ -48,7 +48,14 @@ function closeServer(server) {
 }
 
 async function withServer(
-  { docsDir, dev = false, password = "", curlRouteOptions = {}, docsRouteOptions = {} },
+  {
+    docsDir,
+    dev = false,
+    password = "",
+    collapse = false,
+    curlRouteOptions = {},
+    docsRouteOptions = {},
+  },
   run,
 ) {
   if (!portsChecked) {
@@ -69,6 +76,7 @@ async function withServer(
     server = startServer(0, docsDir, {
       dev,
       password,
+      collapse,
       host: "127.0.0.1",
       curlRouteOptions,
       docsRouteOptions,
@@ -135,6 +143,9 @@ test("protected APIs are blocked until login succeeds", async () => {
         const statusPayload = await statusResponse.json();
         assert.equal(statusPayload.authEnabled, true);
         assert.equal(statusPayload.authenticated, false);
+        assert.deepEqual(statusPayload.features, {
+          contentCollapse: false,
+        });
 
         const blockedTree = await fetch(`${baseUrl}/api/docs/tree`);
         assert.equal(blockedTree.status, 401);
@@ -396,9 +407,36 @@ test("development mode stays open when password is not provided", async () => {
         const statusPayload = await statusResponse.json();
         assert.equal(statusPayload.authEnabled, false);
         assert.equal(statusPayload.authenticated, true);
+        assert.deepEqual(statusPayload.features, {
+          contentCollapse: false,
+        });
 
         const treeResponse = await fetch(`${baseUrl}/api/docs/tree`);
         assert.equal(treeResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("auth status exposes the collapse feature flag when enabled", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true, collapse: true },
+      async ({ baseUrl }) => {
+        const statusResponse = await fetch(`${baseUrl}/api/auth/status`);
+        const statusPayload = await statusResponse.json();
+
+        assert.equal(statusPayload.authEnabled, false);
+        assert.equal(statusPayload.authenticated, true);
+        assert.deepEqual(statusPayload.features, {
+          contentCollapse: true,
+        });
       },
     );
     if (!started) {
