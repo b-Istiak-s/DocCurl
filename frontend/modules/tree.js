@@ -11,7 +11,9 @@ function isAlwaysVisibleElement(element) {
 
 export function collectCollapsedVisibleElements(container) {
   const children = Array.from(container.children || []);
-  const visibleElements = new Set(children.filter((child) => isAlwaysVisibleElement(child)));
+  const visibleElements = new Set(
+    children.filter((child) => isAlwaysVisibleElement(child)),
+  );
 
   children.forEach((child, index) => {
     if (!child?.classList?.contains("curlPlaygroundInline")) {
@@ -38,7 +40,9 @@ export function collectCollapsedVisibleElements(container) {
 }
 
 export function applyCollapsedDocumentView(container, isCollapsed) {
-  const visibleElements = isCollapsed ? collectCollapsedVisibleElements(container) : null;
+  const visibleElements = isCollapsed
+    ? collectCollapsedVisibleElements(container)
+    : null;
 
   Array.from(container.children || []).forEach((child) => {
     const shouldHide =
@@ -66,18 +70,29 @@ export function createDocsTreeSystem({
   const expandedDirs = new Set();
   let docsTree = [];
   let currentDocPath = "";
+  const CARET_EXPANDED_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+  const CARET_COLLAPSED_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+  const FOLDER_ICON_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
+  const FILE_ICON_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
   let isContentCollapsed = false;
 
   function createDocActionBar() {
     const features = getFeatures() || {};
-    const hasCurlBlocks = docContent.querySelectorAll(".curlPlaygroundInline").length > 0;
+    const hasCurlBlocks =
+      docContent.querySelectorAll(".curlPlaygroundInline").length > 0;
 
     const actionBar = document.createElement("div");
     actionBar.className = "docActionBar";
 
     const actionMeta = document.createElement("div");
     actionMeta.className = "docActionMeta";
-    actionMeta.textContent = currentDocPath ? currentDocPath.replace(/\.md$/, "") : "Document";
+    actionMeta.textContent = currentDocPath
+      ? currentDocPath.replace(/\.md$/, "")
+      : "Document";
 
     const actions = document.createElement("div");
     actions.className = "docActionButtons";
@@ -99,7 +114,9 @@ export function createDocsTreeSystem({
       collapseToggle.disabled = !hasCurlBlocks;
 
       const syncCollapseToggle = () => {
-        collapseToggle.textContent = isContentCollapsed ? "Show All" : "Focus Curls";
+        collapseToggle.textContent = isContentCollapsed
+          ? "Show All"
+          : "Focus Curls";
         collapseToggle.setAttribute("aria-pressed", String(isContentCollapsed));
       };
 
@@ -145,7 +162,10 @@ export function createDocsTreeSystem({
       if (node.type === "file" && node.path === pathValue) {
         return true;
       }
-      if (node.type === "dir" && docPathExists(node.children || [], pathValue)) {
+      if (
+        node.type === "dir" &&
+        docPathExists(node.children || [], pathValue)
+      ) {
         return true;
       }
     }
@@ -163,15 +183,22 @@ export function createDocsTreeSystem({
         toggleButton.type = "button";
         toggleButton.className = "docTreeToggle";
         toggleButton.style.paddingLeft = `${13 + depth * 18}px`;
+
         const caret = document.createElement("span");
         caret.className = "docTreeCaret";
-        caret.textContent = expanded ? "▾" : "▸";
+        caret.setAttribute("aria-hidden", "true");
+        caret.innerHTML = expanded ? CARET_EXPANDED_SVG : CARET_COLLAPSED_SVG;
+
+        const folderIcon = document.createElement("span");
+        folderIcon.className = "docIcon folderIcon";
+        folderIcon.setAttribute("aria-hidden", "true");
+        folderIcon.innerHTML = FOLDER_ICON_SVG;
 
         const label = document.createElement("span");
         label.className = "docTreeLabel";
         label.textContent = node.name;
 
-        toggleButton.append(caret, label);
+        toggleButton.append(caret, folderIcon, label);
 
         if (currentDocPath && currentDocPath.startsWith(`${node.path}/`)) {
           toggleButton.classList.add("active");
@@ -205,7 +232,17 @@ export function createDocsTreeSystem({
         fileButton.className = "docListButton docTreeFileButton";
         fileButton.style.paddingLeft = `${13 + depth * 18}px`;
         fileButton.dataset.path = node.path;
-        fileButton.textContent = node.name.replace(/\.md$/, "");
+
+        const fileIcon = document.createElement("span");
+        fileIcon.className = "docIcon fileIcon";
+        fileIcon.setAttribute("aria-hidden", "true");
+        fileIcon.innerHTML = FILE_ICON_SVG;
+
+        const label = document.createElement("span");
+        label.className = "docTreeLabel";
+        label.textContent = node.name.replace(/\.md$/, "");
+
+        fileButton.append(fileIcon, label);
 
         if (currentDocPath === node.path) {
           fileButton.classList.add("active");
@@ -241,7 +278,9 @@ export function createDocsTreeSystem({
     docContent.innerHTML = '<div class="loading">Loading document...</div>';
 
     try {
-      const response = await apiFetch(withBasePath(`/api/docs/content?path=${encodeURIComponent(docPath)}`));
+      const response = await apiFetch(
+        withBasePath(`/api/docs/content?path=${encodeURIComponent(docPath)}`),
+      );
 
       if (!response.ok) {
         const data = await parseJsonSafe(response);
@@ -252,7 +291,8 @@ export function createDocsTreeSystem({
       const data = await parseJsonSafe(response);
       docContent.innerHTML = data.html || "";
 
-      const placeholderNames = envManager.collectPlaceholderNamesFromDocument(docContent);
+      const placeholderNames =
+        envManager.collectPlaceholderNamesFromDocument(docContent);
       playgroundSystem.initializeCurlPlaygrounds(docPath);
       isContentCollapsed = false;
 
@@ -268,11 +308,13 @@ export function createDocsTreeSystem({
       }
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
-        docContent.innerHTML = '<p class="errorText">Authentication required.</p>';
+        docContent.innerHTML =
+          '<p class="errorText">Authentication required.</p>';
         return;
       }
 
-      docContent.innerHTML = '<p class="errorText">Error loading document. Please try again.</p>';
+      docContent.innerHTML =
+        '<p class="errorText">Error loading document. Please try again.</p>';
       console.error("Error loading document:", error);
     }
   }
@@ -293,7 +335,8 @@ export function createDocsTreeSystem({
       renderDocTree();
 
       if (docsTree.length === 0) {
-        docContent.innerHTML = '<p class="errorText">No markdown docs found.</p>';
+        docContent.innerHTML =
+          '<p class="errorText">No markdown docs found.</p>';
         return;
       }
 
@@ -310,7 +353,8 @@ export function createDocsTreeSystem({
         renderDocTree();
         await loadDoc(firstFilePath);
       } else {
-        docContent.innerHTML = '<p class="errorText">No markdown docs found.</p>';
+        docContent.innerHTML =
+          '<p class="errorText">No markdown docs found.</p>';
       }
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
