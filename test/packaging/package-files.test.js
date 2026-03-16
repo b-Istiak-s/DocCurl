@@ -29,6 +29,9 @@ test("npm pack includes runtime docs helpers", () => {
 
     assert.ok(filePaths.has("core/docs/tree.js"));
     assert.ok(filePaths.has("core/docs/paths.js"));
+    assert.ok(filePaths.has("core/import/index.js"));
+    assert.ok(filePaths.has("core/import/markdown/render.js"));
+    assert.ok(filePaths.has("cli/commands/generate-md.js"));
     assert.equal(filePaths.has("docs/overview.md"), false);
     assert.equal(filePaths.has(".env"), false);
   });
