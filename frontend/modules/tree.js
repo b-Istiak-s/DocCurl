@@ -88,8 +88,11 @@ export function createDocsTreeSystem({
   withBasePath,
   envManager,
   playgroundSystem,
+  exportSystem,
   closeSidebar,
   getFeatures = () => ({}),
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
 }) {
   const expandedDirs = new Set();
   let docsTree = [];
@@ -109,19 +112,19 @@ export function createDocsTreeSystem({
     const hasCurlBlocks =
       docContent.querySelectorAll(".curlPlaygroundInline").length > 0;
 
-    const actionBar = document.createElement("div");
+    const actionBar = documentRef.createElement("div");
     actionBar.className = "docActionBar";
 
-    const actionMeta = document.createElement("div");
+    const actionMeta = documentRef.createElement("div");
     actionMeta.className = "docActionMeta";
     actionMeta.textContent = currentDocPath
       ? currentDocPath.replace(/\.md$/, "")
       : "Document";
 
-    const actions = document.createElement("div");
+    const actions = documentRef.createElement("div");
     actions.className = "docActionButtons";
 
-    const pageResetButton = document.createElement("button");
+    const pageResetButton = documentRef.createElement("button");
     pageResetButton.type = "button";
     pageResetButton.className = "secondaryBtn docActionButton";
     pageResetButton.textContent = "Reset Page";
@@ -131,8 +134,19 @@ export function createDocsTreeSystem({
     });
     actions.appendChild(pageResetButton);
 
+    if (exportSystem) {
+      const exportButton = documentRef.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "secondaryBtn docActionButton";
+      exportButton.textContent = "Export Curls";
+      exportButton.addEventListener("click", () => {
+        exportSystem.openExportDialog();
+      });
+      actions.appendChild(exportButton);
+    }
+
     if (features.contentCollapse) {
-      const collapseToggle = document.createElement("button");
+      const collapseToggle = documentRef.createElement("button");
       collapseToggle.type = "button";
       collapseToggle.className = "secondaryBtn docActionButton";
       collapseToggle.disabled = !hasCurlBlocks;
@@ -198,27 +212,27 @@ export function createDocsTreeSystem({
 
   function renderTreeNodes(nodes, container, depth = 0) {
     nodes.forEach((node) => {
-      const item = document.createElement("li");
+      const item = documentRef.createElement("li");
       item.className = "docTreeItem";
 
       if (node.type === "dir") {
         const expanded = expandedDirs.has(node.path);
-        const toggleButton = document.createElement("button");
+        const toggleButton = documentRef.createElement("button");
         toggleButton.type = "button";
         toggleButton.className = "docTreeToggle";
         toggleButton.style.paddingLeft = `${13 + depth * 18}px`;
 
-        const caret = document.createElement("span");
+        const caret = documentRef.createElement("span");
         caret.className = "docTreeCaret";
         caret.setAttribute("aria-hidden", "true");
         caret.innerHTML = expanded ? CARET_EXPANDED_SVG : CARET_COLLAPSED_SVG;
 
-        const folderIcon = document.createElement("span");
+        const folderIcon = documentRef.createElement("span");
         folderIcon.className = "docIcon folderIcon";
         folderIcon.setAttribute("aria-hidden", "true");
         folderIcon.innerHTML = FOLDER_ICON_SVG;
 
-        const label = document.createElement("span");
+        const label = documentRef.createElement("span");
         label.className = "docTreeLabel";
         label.textContent = node.name;
 
@@ -240,7 +254,7 @@ export function createDocsTreeSystem({
         item.appendChild(toggleButton);
 
         if (expanded) {
-          const childrenList = document.createElement("ul");
+          const childrenList = documentRef.createElement("ul");
           childrenList.className = "docTreeChildren";
           renderTreeNodes(node.children || [], childrenList, depth + 1);
           item.appendChild(childrenList);
@@ -251,18 +265,18 @@ export function createDocsTreeSystem({
       }
 
       if (node.type === "file") {
-        const fileButton = document.createElement("button");
+        const fileButton = documentRef.createElement("button");
         fileButton.type = "button";
         fileButton.className = "docListButton docTreeFileButton";
         fileButton.style.paddingLeft = `${13 + depth * 18}px`;
         fileButton.dataset.path = node.path;
 
-        const fileIcon = document.createElement("span");
+        const fileIcon = documentRef.createElement("span");
         fileIcon.className = "docIcon fileIcon";
         fileIcon.setAttribute("aria-hidden", "true");
         fileIcon.innerHTML = FILE_ICON_SVG;
 
-        const label = document.createElement("span");
+        const label = documentRef.createElement("span");
         label.className = "docTreeLabel";
         label.textContent = node.name.replace(/\.md$/, "");
 
@@ -286,7 +300,7 @@ export function createDocsTreeSystem({
   function renderDocTree() {
     docList.innerHTML = "";
 
-    const root = document.createElement("ul");
+    const root = documentRef.createElement("ul");
     root.className = "docTreeRoot";
     renderTreeNodes(docsTree, root, 0);
     docList.appendChild(root);
@@ -327,7 +341,7 @@ export function createDocsTreeSystem({
       docContent.prepend(actionBar);
       applyCollapsedDocumentView(docContent, false);
 
-      if (window.matchMedia("(max-width: 960px)").matches) {
+      if (windowRef.matchMedia("(max-width: 960px)").matches) {
         closeSidebar();
       }
     } catch (error) {

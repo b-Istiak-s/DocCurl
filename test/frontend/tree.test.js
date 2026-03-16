@@ -290,6 +290,9 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
       resetCurrentDocument() {},
       initializeCurlPlaygrounds() {},
     },
+    exportSystem: {
+      openExportDialog() {},
+    },
     closeSidebar() {},
   });
 
@@ -327,6 +330,12 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
     assert.match(fileIcon.innerHTML, /focusable="false"/);
     assert.equal(fileLabel.textContent, "page");
     assert.equal(fileButton.querySelector("img"), null);
+
+    fileButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const actionButtons = docContent.querySelectorAll(".docActionButton");
+    assert.equal(actionButtons.some((button) => button.textContent === "Export Curls"), true);
 
     toggleButton.click();
     assert.equal(docList.querySelector(".docTreeChildren"), null);
