@@ -29,5 +29,18 @@ export function buildCurlArgs(spec) {
     args.push("--data-raw", spec.body);
   }
 
+  for (const formPart of spec.formParts || []) {
+    if (formPart.source === "generated") {
+      const filePath =
+        typeof formPart.filePath === "string" && formPart.filePath
+          ? formPart.filePath
+          : formPart.filename;
+      args.push("-F", `${formPart.name}=@${filePath}`);
+      continue;
+    }
+
+    args.push("-F", `${formPart.name}=${formPart.value}`);
+  }
+
   return args;
 }
