@@ -1,5 +1,6 @@
-import { ALLOWED_METHODS, DATA_FLAGS } from "./constants.js";
+import { ALLOWED_METHODS, DATA_FLAGS, FORM_FLAGS } from "./constants.js";
 import { tokenizeCommand } from "./tokenize.js";
+import { parseMultipartFormPart } from "./uploads/parse.js";
 
 export function parseHeader(rawHeader) {
   if (typeof rawHeader !== "string" || !rawHeader.includes(":")) {
@@ -28,6 +29,7 @@ export function parseCurlCommand(command) {
   let headRequested = false;
   const headers = [];
   const bodyParts = [];
+  const formParts = [];
 
   function readNextValue(flag, index) {
     const value = tokens[index + 1];
@@ -73,6 +75,9 @@ export function parseCurlCommand(command) {
     }
 
     if (DATA_FLAGS.has(token)) {
+      if (formParts.length > 0) {
+        throw new Error("Multipart form data cannot be mixed with body data");
+      }
       bodyParts.push(readNextValue(token, i));
       i += 1;
       continue;
@@ -80,6 +85,9 @@ export function parseCurlCommand(command) {
 
     const dataMatch = token.match(/^--data(?:-raw|-binary|-urlencode)?=(.*)$/);
     if (dataMatch) {
+      if (formParts.length > 0) {
+        throw new Error("Multipart form data cannot be mixed with body data");
+      }
       bodyParts.push(dataMatch[1]);
       continue;
     }
@@ -100,8 +108,29 @@ export function parseCurlCommand(command) {
       continue;
     }
 
-    if (token === "-F" || token === "--form" || token.startsWith("--form=")) {
-      throw new Error("Multipart (-F/--form) is not supported in DocCurl");
+    if (FORM_FLAGS.has(token)) {
+      if (bodyParts.length > 0) {
+        throw new Error("Multipart form data cannot be mixed with body data");
+      }
+      formParts.push(parseMultipartFormPart(readNextValue(token, i)));
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("--form=")) {
+      if (bodyParts.length > 0) {
+        throw new Error("Multipart form data cannot be mixed with body data");
+      }
+      formParts.push(parseMultipartFormPart(token.slice("--form=".length)));
+      continue;
+    }
+
+    if (token.startsWith("-F") && token.length > 2) {
+      if (bodyParts.length > 0) {
+        throw new Error("Multipart form data cannot be mixed with body data");
+      }
+      formParts.push(parseMultipartFormPart(token.slice(2)));
+      continue;
     }
 
     if (token === "-L" || token === "--location") {
@@ -142,7 +171,7 @@ export function parseCurlCommand(command) {
 
   let method = explicitMethod ? explicitMethod.toUpperCase() : headRequested ? "HEAD" : "GET";
 
-  if (!explicitMethod && bodyParts.length > 0 && method === "GET") {
+  if (!explicitMethod && (bodyParts.length > 0 || formParts.length > 0) && method === "GET") {
     method = "POST";
   }
 
@@ -155,6 +184,7 @@ export function parseCurlCommand(command) {
     url,
     headers,
     body: bodyParts.join("&"),
+    formParts,
   };
 }
 
@@ -182,6 +212,7 @@ export function parseLegacyRequest(payload) {
     url: url.trim(),
     headers: headerList,
     body: body == null ? "" : String(body),
+    formParts: [],
   };
 }
 

@@ -223,6 +223,10 @@ class MockElement {
     this.dispatch("click");
   }
 
+  focus() {}
+
+  select() {}
+
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] || null;
   }
@@ -305,11 +309,13 @@ function buildPlaygroundMarkup(container) {
   const overlayCode = createElement("code", "language-bash");
   const editor = createElement("textarea", "curlEditor");
   const requestActions = createElement("div", "panelActions");
+  const copyButton = createElement("button", "copyBtn", "Copy");
   const runButton = createElement("button", "runBtn", "Run");
 
   overlay.appendChild(overlayCode);
   editorShell.append(overlay, editor);
   requestWrapper.appendChild(editorShell);
+  requestActions.appendChild(copyButton);
   requestActions.appendChild(runButton);
   requestPane.append(requestHeader, requestWrapper, requestActions);
 
@@ -438,8 +444,10 @@ test("initializeCurlPlaygrounds restores saved edits and keeps stable block ids 
 
     const playgrounds = docContent.querySelectorAll(".curlPlaygroundInline");
     const editors = docContent.querySelectorAll(".curlEditor");
+    const copyButtons = docContent.querySelectorAll(".copyBtn");
 
     assert.equal(playgrounds.length, 2);
+    assert.equal(copyButtons.length, 2);
     assert.equal(
       playgrounds[0].dataset.curlBlockId,
       createStableCurlBlockId("guide.md", 0, originalTemplate),
@@ -447,6 +455,61 @@ test("initializeCurlPlaygrounds restores saved edits and keeps stable block ids 
     assert.equal(playgrounds[1].dataset.curlBlockId, secondBlockId);
     assert.equal(editors[0].value, originalTemplate);
     assert.equal(editors[1].value, storedEdit);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("copy button uses current env values and current editor text", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock('curl "$BASE_URL/users"'));
+    const copyCalls = [];
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({
+          BASE_URL: "https://api.example.com",
+        }),
+      },
+      copyController: {
+        async copyRequest(payload) {
+          copyCalls.push(payload);
+          return true;
+        },
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const editor = docContent.querySelector(".curlEditor");
+    const copyButton = docContent.querySelector(".copyBtn");
+    editor.value = 'curl "$BASE_URL/customers"';
+    copyButton.click();
+
+    assert.equal(copyCalls.length, 1);
+    assert.equal(copyCalls[0].button, copyButton);
+    assert.equal(copyCalls[0].command, 'curl "$BASE_URL/customers"');
+    assert.deepEqual(copyCalls[0].env, {
+      BASE_URL: "https://api.example.com",
+    });
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

@@ -120,7 +120,68 @@ test("parseCurlCommand parses quoted URL and headers", () => {
 test("parseCurlCommand rejects multipart form flags", () => {
   assert.throws(
     () => parseCurlCommand('curl -F "file=@/tmp/x.pdf" https://api.example.com'),
-    /not supported/i,
+    /generated files/i,
+  );
+});
+
+test("parseCurlCommand accepts generated multipart uploads and infers POST", () => {
+  const parsed = parseCurlCommand('curl -F "avatar=@R&{avatar.png}" https://api.example.com');
+
+  assert.equal(parsed.method, "POST");
+  assert.equal(parsed.url, "https://api.example.com");
+  assert.deepEqual(parsed.formParts, [
+    {
+      name: "avatar",
+      filename: "avatar.png",
+      extension: "png",
+      source: "generated",
+    },
+  ]);
+  assert.equal(parsed.body, "");
+});
+
+test("parseCurlCommand accepts text and generated multipart fields together", () => {
+  const parsed = parseCurlCommand(
+    'curl -F "company_id=1" -F "documents[]=@R&{license.pdf}" https://api.example.com',
+  );
+
+  assert.equal(parsed.method, "POST");
+  assert.deepEqual(parsed.formParts, [
+    {
+      name: "company_id",
+      value: "1",
+      source: "text",
+    },
+    {
+      name: "documents[]",
+      filename: "license.pdf",
+      extension: "pdf",
+      source: "generated",
+    },
+  ]);
+});
+
+test("parseCurlCommand rejects unsupported generated upload extensions", () => {
+  assert.throws(
+    () => parseCurlCommand('curl -F "avatar=@R&{avatar.exe}" https://api.example.com'),
+    /unsupported generated upload extension/i,
+  );
+});
+
+test("parseCurlCommand still rejects real file paths in multipart fields", () => {
+  assert.throws(
+    () => parseCurlCommand('curl -F "avatar=@/tmp/x.pdf" https://api.example.com'),
+    /only support generated files/i,
+  );
+});
+
+test("parseCurlCommand rejects mixing multipart and body data", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        'curl -F "avatar=@R&{avatar.png}" -d "name=test" https://api.example.com',
+      ),
+    /cannot be mixed/i,
   );
 });
 
@@ -256,6 +317,161 @@ test("POST /api/run-curl executes valid parsed command with hardened container a
   assert.ok(calls[0].args.includes("--network=bridge"));
   assert.equal(calls[0].args.includes("--network=host"), false);
   assert.ok(calls[0].args.includes("--write-out"));
+});
+
+test("POST /api/run-curl mounts generated multipart uploads and rewrites curl args", async () => {
+  const calls = [];
+  const writes = [];
+  const chmods = [];
+  const removals = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadTmpDir: "/tmp",
+      uploadFsMkdtemp: async () => "/tmp/doccurl-upload-test",
+      uploadFsWriteFile: async (filePath, value) => {
+        writes.push({ filePath, value: Buffer.from(value) });
+      },
+      uploadFsChmod: async (targetPath, mode) => {
+        chmods.push({ targetPath, mode });
+      },
+      uploadFsRm: async (targetPath, options) => {
+        removals.push({ targetPath, options });
+      },
+      execFileImpl: (command, args, _options, callback) => {
+        calls.push({ command, args });
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.includes("-v"));
+  assert.ok(calls[0].args.includes("/tmp/doccurl-upload-test:/tmp/doccurl-uploads:ro"));
+  assert.ok(calls[0].args.includes("-F"));
+  assert.ok(calls[0].args.includes("avatar=@/tmp/doccurl-uploads/avatar.png"));
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].filePath, "/tmp/doccurl-upload-test/avatar.png");
+  assert.deepEqual(chmods, [
+    { targetPath: "/tmp/doccurl-upload-test", mode: 0o755 },
+    { targetPath: "/tmp/doccurl-upload-test/avatar.png", mode: 0o644 },
+  ]);
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: "/tmp/doccurl-upload-test",
+    options: { recursive: true, force: true },
+  });
+});
+
+test("POST /api/run-curl keeps multipart text fields while mounting generated uploads", async () => {
+  const calls = [];
+  const writes = [];
+  const chmods = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadTmpDir: "/tmp",
+      uploadFsMkdtemp: async () => "/tmp/doccurl-upload-mixed",
+      uploadFsWriteFile: async (filePath, value) => {
+        writes.push({ filePath, value: Buffer.from(value) });
+      },
+      uploadFsChmod: async (targetPath, mode) => {
+        chmods.push({ targetPath, mode });
+      },
+      uploadFsRm: async () => {},
+      execFileImpl: (command, args, _options, callback) => {
+        calls.push({ command, args });
+        callback(null, "ok", "");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command:
+            'curl -F "company_id=1" -F "documents[]=@R&{license.pdf}" "https://api.example.com/upload"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(calls.length, 1);
+  const formFlags = calls[0].args.filter((value, index, array) => array[index - 1] === "-F");
+  assert.deepEqual(formFlags, [
+    "company_id=1",
+    "documents[]=@/tmp/doccurl-uploads/license.pdf",
+  ]);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].filePath, "/tmp/doccurl-upload-mixed/license.pdf");
+  assert.deepEqual(chmods, [
+    { targetPath: "/tmp/doccurl-upload-mixed", mode: 0o755 },
+    { targetPath: "/tmp/doccurl-upload-mixed/license.pdf", mode: 0o644 },
+  ]);
+});
+
+test("POST /api/run-curl cleans up generated uploads when execution fails", async () => {
+  const removals = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadTmpDir: "/tmp",
+      uploadFsMkdtemp: async () => "/tmp/doccurl-upload-failure",
+      uploadFsWriteFile: async () => {},
+      uploadFsChmod: async () => {},
+      uploadFsRm: async (targetPath, options) => {
+        removals.push({ targetPath, options });
+      },
+      execFileImpl: (_command, _args, _options, callback) => {
+        callback(new Error("boom"), "", "upload failed");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 500);
+      assert.match(data.details, /upload failed/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: "/tmp/doccurl-upload-failure",
+    options: { recursive: true, force: true },
+  });
 });
 
 test("POST /api/run-curl returns upstream status, content type, and timing metadata", async () => {

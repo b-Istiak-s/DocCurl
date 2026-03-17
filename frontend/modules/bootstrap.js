@@ -1,7 +1,9 @@
 import { inferBasePathFromPathname, createWithBasePath } from "./base-path.js";
 import { createApiClient } from "./api.js";
+import { createCopyController } from "./copy/clipboard.js";
 import { createAuthController } from "./auth.js";
 import { createEnvManager } from "./env.js";
+import { createCurlExportSystem } from "./export/index.js";
 import { createPlaygroundSystem } from "./playground.js";
 import { createDocsTreeSystem } from "./tree.js";
 
@@ -56,6 +58,13 @@ export async function bootstrapApp() {
   });
 
   const envManager = createEnvManager({});
+  const copyController = createCopyController({});
+  const exportSystem = createCurlExportSystem({
+    apiFetch: apiClient.apiFetch,
+    parseJsonSafe: apiClient.parseJsonSafe,
+    withBasePath,
+    envManager,
+  });
 
   const playgroundSystem = createPlaygroundSystem({
     docContent,
@@ -65,6 +74,7 @@ export async function bootstrapApp() {
     parseJsonSafe: apiClient.parseJsonSafe,
     withBasePath,
     envManager,
+    copyController,
   });
 
   const docsTreeSystem = createDocsTreeSystem({
@@ -75,6 +85,7 @@ export async function bootstrapApp() {
     withBasePath,
     envManager,
     playgroundSystem,
+    exportSystem,
     closeSidebar,
     getFeatures: () => featureFlags,
   });

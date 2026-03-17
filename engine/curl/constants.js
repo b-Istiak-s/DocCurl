@@ -17,6 +17,8 @@ export const DATA_FLAGS = new Set([
   "--data-urlencode",
 ]);
 
+export const FORM_FLAGS = new Set(["-F", "--form"]);
+
 export const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "host.docker.internal",
@@ -61,6 +63,7 @@ export const LIMITS = {
   maxHeaderNameLength: 128,
   maxHeaderValueLength: 2_048,
   maxBodyBytes: 64 * 1024,
+  maxFormParts: 12,
   maxOutputBytes: 1024 * 1024,
   requestTimeoutMs: 5_000,
 };

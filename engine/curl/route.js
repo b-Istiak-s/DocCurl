@@ -11,6 +11,7 @@ import { validateRequestSpec } from "./validate.js";
 import { defaultDnsLookup, isLocalDevTarget, validateTargetUrl } from "./network.js";
 import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
+import { prepareGeneratedUploads } from "./uploads/files.js";
 
 function parseCurlResponseMetadata(stdout) {
   const text = String(stdout ?? "");
@@ -78,6 +79,7 @@ export function setupCurlRoutes(app, options = {}) {
   app.post("/api/run-curl", async (req, res) => {
     let requestSpec;
     let containerRuntime;
+    let uploadSession;
     try {
       requestSpec = resolveRequestSpec(req.body);
       validateRequestSpec(requestSpec);
@@ -92,7 +94,28 @@ export function setupCurlRoutes(app, options = {}) {
 
       containerRuntime = await getContainerRuntime();
       await ensureNoDockerMarker(containerRuntime);
+
+      if (requestSpec.formParts.length > 0) {
+        uploadSession = await prepareGeneratedUploads(requestSpec.formParts, {
+          tmpDir: options.uploadTmpDir,
+          mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
+          writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
+          chmodImpl: options.uploadFsChmod || fs.chmod,
+          rmImpl: options.uploadFsRm || fs.rm,
+          logger: options.logger || console,
+        });
+        requestSpec = {
+          ...requestSpec,
+          formParts: requestSpec.formParts.map((part) => ({
+            ...part,
+            filePath: uploadSession.resolveFormFilePath(part),
+          })),
+        };
+      }
     } catch (error) {
+      if (uploadSession) {
+        await uploadSession.cleanup();
+      }
       return res.status(400).json({ error: error.message });
     }
 
@@ -111,32 +134,52 @@ export function setupCurlRoutes(app, options = {}) {
       `--network=${networkMode}`,
       "--tmpfs=/tmp:rw,noexec,nosuid,size=16m",
       "--user=65534:65534",
+      ...(uploadSession?.mountArgs || []),
       containerImage,
       ...curlArgs,
     ];
 
-    execFileImpl(
-      containerRuntime,
-      containerArgs,
-      {
-        timeout: LIMITS.requestTimeoutMs,
-        maxBuffer: LIMITS.maxOutputBytes,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          return res.status(500).json({
-            error: "Execution failed",
-            details: stderr || error.message,
-          });
-        }
+    const finishWithCleanup = async (sendResponse) => {
+      if (uploadSession) {
+        await uploadSession.cleanup();
+        uploadSession = null;
+      }
+      return sendResponse();
+    };
 
-        const result = parseCurlResponseMetadata(stdout);
-        return res.json({
-          success: true,
-          output: result.output,
-          metadata: result.metadata,
-        });
-      },
-    );
+    try {
+      execFileImpl(
+        containerRuntime,
+        containerArgs,
+        {
+          timeout: LIMITS.requestTimeoutMs,
+          maxBuffer: LIMITS.maxOutputBytes,
+        },
+        (error, stdout, stderr) => {
+          finishWithCleanup(() => {
+            if (error) {
+              return res.status(500).json({
+                error: "Execution failed",
+                details: stderr || error.message,
+              });
+            }
+
+            const result = parseCurlResponseMetadata(stdout);
+            return res.json({
+              success: true,
+              output: result.output,
+              metadata: result.metadata,
+            });
+          });
+        },
+      );
+    } catch (error) {
+      await finishWithCleanup(() =>
+        res.status(500).json({
+          error: "Execution failed",
+          details: error.message,
+        }),
+      );
+    }
   });
 }

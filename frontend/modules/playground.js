@@ -55,7 +55,11 @@ function normalizeStoredCurlEdits(value) {
   return normalized;
 }
 
-export function loadStoredCurlEdits(localStorageRef = localStorage) {
+export function loadStoredCurlEdits(localStorageRef = globalThis.localStorage) {
+  if (!localStorageRef?.getItem) {
+    return Object.create(null);
+  }
+
   const rawValue = localStorageRef.getItem(STORAGE_KEYS.curlEdits);
   if (!rawValue) {
     return Object.create(null);
@@ -68,7 +72,11 @@ export function loadStoredCurlEdits(localStorageRef = localStorage) {
   }
 }
 
-function persistStoredCurlEdits(edits, localStorageRef = localStorage) {
+function persistStoredCurlEdits(edits, localStorageRef = globalThis.localStorage) {
+  if (!localStorageRef?.setItem) {
+    return;
+  }
+
   localStorageRef.setItem(
     STORAGE_KEYS.curlEdits,
     JSON.stringify(normalizeStoredCurlEdits(edits)),
@@ -80,7 +88,7 @@ export function createStableCurlBlockId(docPath, blockIndex, originalCommand) {
   return `curl-${blockIndex}-${hashString(`${docPath}\n${normalizedCommand}`)}`;
 }
 
-export function getStoredCurlEdit(docPath, blockId, localStorageRef = localStorage) {
+export function getStoredCurlEdit(docPath, blockId, localStorageRef = globalThis.localStorage) {
   const edits = loadStoredCurlEdits(localStorageRef);
   return edits[docPath]?.[blockId] || "";
 }
@@ -90,7 +98,7 @@ export function saveStoredCurlEdit(
   blockId,
   command,
   originalCommand,
-  localStorageRef = localStorage,
+  localStorageRef = globalThis.localStorage,
 ) {
   const edits = loadStoredCurlEdits(localStorageRef);
   const normalizedCommand = String(command || "");
@@ -117,7 +125,10 @@ export function saveStoredCurlEdit(
   return edits;
 }
 
-export function clearStoredCurlEditsForDocument(docPath, localStorageRef = localStorage) {
+export function clearStoredCurlEditsForDocument(
+  docPath,
+  localStorageRef = globalThis.localStorage,
+) {
   const edits = loadStoredCurlEdits(localStorageRef);
 
   if (!docPath || !edits[docPath]) {
@@ -129,7 +140,7 @@ export function clearStoredCurlEditsForDocument(docPath, localStorageRef = local
   return edits;
 }
 
-export function clearAllStoredCurlEdits(localStorageRef = localStorage) {
+export function clearAllStoredCurlEdits(localStorageRef = globalThis.localStorage) {
   const emptyEdits = Object.create(null);
   persistStoredCurlEdits(emptyEdits, localStorageRef);
   return emptyEdits;
@@ -284,6 +295,7 @@ export function formatCurlCommand(command) {
   let url = "";
   const headers = [];
   const dataEntries = [];
+  const formEntries = [];
   const passthrough = [];
 
   for (let i = 1; i < tokens.length; i += 1) {
@@ -335,6 +347,22 @@ export function formatCurlCommand(command) {
       continue;
     }
 
+    if (token === "-F" || token === "--form") {
+      formEntries.push(tokens[i + 1] || "");
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("--form=")) {
+      formEntries.push(token.slice("--form=".length));
+      continue;
+    }
+
+    if (token.startsWith("-F") && token.length > 2) {
+      formEntries.push(token.slice(2));
+      continue;
+    }
+
     if (
       token.startsWith("--data=") ||
       token.startsWith("--data-raw=") ||
@@ -354,7 +382,7 @@ export function formatCurlCommand(command) {
   }
 
   if (!method) {
-    method = dataEntries.length > 0 ? "POST" : "GET";
+    method = dataEntries.length > 0 || formEntries.length > 0 ? "POST" : "GET";
   }
 
   const lines = ["curl \\"];
@@ -370,6 +398,10 @@ export function formatCurlCommand(command) {
 
   for (const dataEntry of dataEntries) {
     lines.push(...formatDataLines(dataEntry));
+  }
+
+  for (const formEntry of formEntries) {
+    lines.push(`  -F ${quoteDouble(formEntry)} \\`);
   }
 
   for (const extra of passthrough) {
@@ -630,15 +662,20 @@ export function createPlaygroundSystem({
   parseJsonSafe,
   withBasePath,
   envManager,
-  localStorageRef = localStorage,
-  documentRef = document,
-  windowRef = window,
+  copyController = {
+    async copyRequest() {
+      return false;
+    },
+  },
+  localStorageRef = globalThis.localStorage,
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
 }) {
   const playgroundStates = new Map();
   let playgroundCounter = 0;
   let fullscreenState = null;
   let currentDocPath = "";
-  const bodyElement = documentRef.body || document.body;
+  const bodyElement = documentRef?.body || globalThis.document?.body || null;
 
   function persistEditorValue(state) {
     saveStoredCurlEdit(
@@ -740,6 +777,7 @@ export function createPlaygroundSystem({
           </div>
         </div>
         <div class="panelActions">
+          <button type="button" class="copyBtn">Copy</button>
           <button type="button" class="runBtn">Run</button>
         </div>
       </section>
@@ -765,6 +803,7 @@ export function createPlaygroundSystem({
     const outputElement = playground.querySelector(".curlOutput");
     const responseMetaButton = playground.querySelector(".responseMetaBtn");
     const responseMetaToast = playground.querySelector(".responseMetaToast");
+    const copyButton = playground.querySelector(".copyBtn");
     const runButton = playground.querySelector(".runBtn");
     const fullscreenButton = playground.querySelector(".fullscreenBtn");
     const storedValue = getStoredCurlEdit(docPath, blockId, localStorageRef);
@@ -781,6 +820,7 @@ export function createPlaygroundSystem({
       outputElement,
       responseMetaButton,
       responseMetaToast,
+      copyButton,
       runButton,
       fullscreenButton,
       originalTemplate,
@@ -817,6 +857,14 @@ export function createPlaygroundSystem({
       const visibleCommand = editorElement.value || "";
       const resolvedCommand = replacePlaceholders(visibleCommand, env);
       await runCurlCommand(resolvedCommand, state);
+    });
+
+    copyButton.addEventListener("click", async () => {
+      await copyController.copyRequest({
+        button: copyButton,
+        command: editorElement.value || "",
+        env: envManager.getCurrentEnv(),
+      });
     });
 
     fullscreenButton.addEventListener("click", () => {
