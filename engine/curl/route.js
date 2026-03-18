@@ -9,7 +9,11 @@ import {
 } from "./constants.js";
 import { resolveRequestSpec } from "./parse.js";
 import { validateRequestSpec } from "./validate.js";
-import { defaultDnsLookup, isLocalDevTarget, validateTargetUrl } from "./network.js";
+import {
+  defaultDnsLookup,
+  isLocalDevTarget,
+  validateTargetUrl,
+} from "./network.js";
 import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
 import { prepareMountedUploads } from "./uploads/files.js";
@@ -31,8 +35,12 @@ function parseCurlResponseMetadata(stdout) {
     };
   }
 
-  const metadataText = text.slice(startIndex + CURL_RESPONSE_META_START.length, endIndex);
-  const [statusCodeRaw = "", contentTypeRaw = "", timeTotalRaw = ""] = metadataText.split("\t");
+  const metadataText = text.slice(
+    startIndex + CURL_RESPONSE_META_START.length,
+    endIndex,
+  );
+  const [statusCodeRaw = "", contentTypeRaw = "", timeTotalRaw = ""] =
+    metadataText.split("\t");
 
   const statusCode = Number.parseInt(statusCodeRaw, 10);
   const durationSeconds = Number.parseFloat(timeTotalRaw);
@@ -42,7 +50,9 @@ function parseCurlResponseMetadata(stdout) {
     metadata: {
       statusCode: Number.isFinite(statusCode) ? statusCode : null,
       contentType: contentTypeRaw || null,
-      durationMs: Number.isFinite(durationSeconds) ? Math.round(durationSeconds * 1000) : null,
+      durationMs: Number.isFinite(durationSeconds)
+        ? Math.round(durationSeconds * 1000)
+        : null,
     },
   };
 }
@@ -125,7 +135,8 @@ export function setupCurlRoutes(app, options = {}) {
           mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
           mkdirImpl: options.uploadFsMkdir || fs.mkdir,
           rmImpl: options.uploadFsRm || fs.rm,
-          createWriteStreamImpl: options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
+          createWriteStreamImpl:
+            options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
           logger: options.logger || console,
         });
         requestBody = multipartSession.body;
@@ -140,6 +151,10 @@ export function setupCurlRoutes(app, options = {}) {
         dnsLookup,
       });
       if (urlError) {
+        if (multipartSession) {
+          await multipartSession.cleanup();
+          multipartSession = null;
+        }
         return res.status(400).json({ error: urlError });
       }
 
@@ -149,16 +164,20 @@ export function setupCurlRoutes(app, options = {}) {
       if (requestSpec.formParts.length > 0) {
         const mountTempDir = multipartSession?.tempDir || null;
         multipartSession = null;
-        uploadSession = await prepareMountedUploads(requestSpec.formParts, uploadFilesByIndex, {
-          tempDir: mountTempDir,
-          tmpDir: options.uploadTmpDir,
-          mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
-          writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
-          chmodImpl: options.uploadFsChmod || fs.chmod,
-          renameImpl: options.uploadFsRename || fs.rename,
-          rmImpl: options.uploadFsRm || fs.rm,
-          logger: options.logger || console,
-        });
+        uploadSession = await prepareMountedUploads(
+          requestSpec.formParts,
+          uploadFilesByIndex,
+          {
+            tempDir: mountTempDir,
+            tmpDir: options.uploadTmpDir,
+            mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
+            writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
+            chmodImpl: options.uploadFsChmod || fs.chmod,
+            renameImpl: options.uploadFsRename || fs.rename,
+            rmImpl: options.uploadFsRm || fs.rm,
+            logger: options.logger || console,
+          },
+        );
         requestSpec = {
           ...requestSpec,
           formParts: requestSpec.formParts.map((part) => ({
@@ -174,13 +193,16 @@ export function setupCurlRoutes(app, options = {}) {
         await multipartSession.cleanup();
       }
       if (req.is("multipart/form-data")) {
-        return res.status(400).json({ error: formatMultipartError(error, uploadLimits) });
+        return res
+          .status(400)
+          .json({ error: formatMultipartError(error, uploadLimits) });
       }
       return res.status(400).json({ error: error.message });
     }
 
     const curlArgs = buildCurlArgs(requestSpec);
-    const networkMode = isDev && isLocalDevTarget(requestSpec.url) ? "host" : "bridge";
+    const networkMode =
+      isDev && isLocalDevTarget(requestSpec.url) ? "host" : "bridge";
 
     const containerArgs = [
       "run",
