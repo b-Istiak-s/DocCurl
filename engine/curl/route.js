@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import {
   CURL_RESPONSE_META_END,
@@ -8,10 +9,15 @@ import {
 } from "./constants.js";
 import { resolveRequestSpec } from "./parse.js";
 import { validateRequestSpec } from "./validate.js";
-import { defaultDnsLookup, isLocalDevTarget, validateTargetUrl } from "./network.js";
+import {
+  defaultDnsLookup,
+  isLocalDevTarget,
+  validateTargetUrl,
+} from "./network.js";
 import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
-import { prepareGeneratedUploads } from "./uploads/files.js";
+import { prepareMountedUploads } from "./uploads/files.js";
+import { parseMultipartUploadRequest } from "./uploads/multipart.js";
 
 function parseCurlResponseMetadata(stdout) {
   const text = String(stdout ?? "");
@@ -29,8 +35,12 @@ function parseCurlResponseMetadata(stdout) {
     };
   }
 
-  const metadataText = text.slice(startIndex + CURL_RESPONSE_META_START.length, endIndex);
-  const [statusCodeRaw = "", contentTypeRaw = "", timeTotalRaw = ""] = metadataText.split("\t");
+  const metadataText = text.slice(
+    startIndex + CURL_RESPONSE_META_START.length,
+    endIndex,
+  );
+  const [statusCodeRaw = "", contentTypeRaw = "", timeTotalRaw = ""] =
+    metadataText.split("\t");
 
   const statusCode = Number.parseInt(statusCodeRaw, 10);
   const durationSeconds = Number.parseFloat(timeTotalRaw);
@@ -40,9 +50,35 @@ function parseCurlResponseMetadata(stdout) {
     metadata: {
       statusCode: Number.isFinite(statusCode) ? statusCode : null,
       contentType: contentTypeRaw || null,
-      durationMs: Number.isFinite(durationSeconds) ? Math.round(durationSeconds * 1000) : null,
+      durationMs: Number.isFinite(durationSeconds)
+        ? Math.round(durationSeconds * 1000)
+        : null,
     },
   };
+}
+
+function formatMultipartError(error, limits = LIMITS) {
+  if (!error) {
+    return "Invalid multipart upload payload";
+  }
+
+  if (error.code === "LIMIT_FILE_SIZE") {
+    return `Each uploaded file must be ${Math.round(limits.maxUploadFileBytes / (1024 * 1024))} MB or smaller`;
+  }
+  if (error.code === "LIMIT_TOTAL_FILE_SIZE") {
+    return `Uploaded files must total ${Math.round(limits.maxUploadTotalBytes / (1024 * 1024))} MB or less`;
+  }
+  if (error.code === "LIMIT_FILE_COUNT") {
+    return "Too many uploaded files";
+  }
+  if (error.code === "LIMIT_FIELD_COUNT") {
+    return "Unexpected multipart fields";
+  }
+  if (error.code === "LIMIT_FIELD_VALUE") {
+    return "Curl command field is too large";
+  }
+
+  return error.message || "Invalid multipart upload payload";
 }
 
 export function setupCurlRoutes(app, options = {}) {
@@ -62,6 +98,13 @@ export function setupCurlRoutes(app, options = {}) {
       logger: options.logger || console,
     });
   const runtimeOverride = options.containerRuntime;
+  const uploadLimits = {
+    maxCommandLength: LIMITS.maxCommandLength,
+    maxFormParts: LIMITS.maxFormParts,
+    maxUploadFileBytes: LIMITS.maxUploadFileBytes,
+    maxUploadTotalBytes: LIMITS.maxUploadTotalBytes,
+    ...options.uploadLimits,
+  };
 
   let runtimePromise = null;
 
@@ -77,11 +120,30 @@ export function setupCurlRoutes(app, options = {}) {
   }
 
   app.post("/api/run-curl", async (req, res) => {
+    let requestBody = req.body;
     let requestSpec;
     let containerRuntime;
+    let multipartSession;
     let uploadSession;
+    let uploadFilesByIndex = new Map();
     try {
-      requestSpec = resolveRequestSpec(req.body);
+      if (req.is("multipart/form-data")) {
+        multipartSession = await parseMultipartUploadRequest(req, {
+          tmpDir: options.uploadTmpDir,
+          limits: uploadLimits,
+          BusboyImpl: options.BusboyImpl,
+          mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
+          mkdirImpl: options.uploadFsMkdir || fs.mkdir,
+          rmImpl: options.uploadFsRm || fs.rm,
+          createWriteStreamImpl:
+            options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
+          logger: options.logger || console,
+        });
+        requestBody = multipartSession.body;
+        uploadFilesByIndex = multipartSession.uploadFilesByIndex;
+      }
+
+      requestSpec = resolveRequestSpec(requestBody);
       validateRequestSpec(requestSpec);
 
       const urlError = await validateTargetUrl(requestSpec.url, {
@@ -89,6 +151,10 @@ export function setupCurlRoutes(app, options = {}) {
         dnsLookup,
       });
       if (urlError) {
+        if (multipartSession) {
+          await multipartSession.cleanup();
+          multipartSession = null;
+        }
         return res.status(400).json({ error: urlError });
       }
 
@@ -96,14 +162,22 @@ export function setupCurlRoutes(app, options = {}) {
       await ensureNoDockerMarker(containerRuntime);
 
       if (requestSpec.formParts.length > 0) {
-        uploadSession = await prepareGeneratedUploads(requestSpec.formParts, {
-          tmpDir: options.uploadTmpDir,
-          mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
-          writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
-          chmodImpl: options.uploadFsChmod || fs.chmod,
-          rmImpl: options.uploadFsRm || fs.rm,
-          logger: options.logger || console,
-        });
+        const mountTempDir = multipartSession?.tempDir || null;
+        multipartSession = null;
+        uploadSession = await prepareMountedUploads(
+          requestSpec.formParts,
+          uploadFilesByIndex,
+          {
+            tempDir: mountTempDir,
+            tmpDir: options.uploadTmpDir,
+            mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
+            writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
+            chmodImpl: options.uploadFsChmod || fs.chmod,
+            renameImpl: options.uploadFsRename || fs.rename,
+            rmImpl: options.uploadFsRm || fs.rm,
+            logger: options.logger || console,
+          },
+        );
         requestSpec = {
           ...requestSpec,
           formParts: requestSpec.formParts.map((part) => ({
@@ -115,12 +189,20 @@ export function setupCurlRoutes(app, options = {}) {
     } catch (error) {
       if (uploadSession) {
         await uploadSession.cleanup();
+      } else if (multipartSession) {
+        await multipartSession.cleanup();
+      }
+      if (req.is("multipart/form-data")) {
+        return res
+          .status(400)
+          .json({ error: formatMultipartError(error, uploadLimits) });
       }
       return res.status(400).json({ error: error.message });
     }
 
     const curlArgs = buildCurlArgs(requestSpec);
-    const networkMode = isDev && isLocalDevTarget(requestSpec.url) ? "host" : "bridge";
+    const networkMode =
+      isDev && isLocalDevTarget(requestSpec.url) ? "host" : "bridge";
 
     const containerArgs = [
       "run",
@@ -143,6 +225,9 @@ export function setupCurlRoutes(app, options = {}) {
       if (uploadSession) {
         await uploadSession.cleanup();
         uploadSession = null;
+      } else if (multipartSession) {
+        await multipartSession.cleanup();
+        multipartSession = null;
       }
       return sendResponse();
     };

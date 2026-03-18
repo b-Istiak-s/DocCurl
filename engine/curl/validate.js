@@ -51,6 +51,12 @@ export function validateRequestSpec(spec) {
       }
       continue;
     }
+    if (formPart.source === "upload") {
+      if (typeof formPart.uploadIndex !== "number" || formPart.uploadIndex < 0) {
+        throw new Error("Multipart upload field is missing its upload index");
+      }
+      continue;
+    }
 
     if (typeof formPart.value !== "string") {
       throw new Error("Multipart text field value must be a string");

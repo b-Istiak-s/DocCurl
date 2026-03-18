@@ -2,7 +2,7 @@
 
 Interactive curl documentation site with runnable playgrounds.
 
-`doccurl` lets you write API docs in Markdown and run embedded `curl` commands from a browser UI. It serves docs, replaces placeholder variables (for example `$BASE_URL`), supports generated-file uploads like `@R&{avatar.png}`, and executes requests in a sandboxed Docker/Podman container.
+`doccurl` lets you write API docs in Markdown and run embedded `curl` commands from a browser UI. It serves docs, replaces placeholder variables (for example `$BASE_URL`), supports generated-file uploads like `@R&{avatar.png}` plus browser-selected multipart uploads like `@/tmp/avatar.png`, and executes requests in a sandboxed Docker/Podman container.
 
 ## Install
 
@@ -126,33 +126,37 @@ Edited curl blocks are stored separately in browser `localStorage` under `doccur
 Each curl playground also includes:
 
 - `Copy`: copies shell-ready `export NAME='value'` lines plus the current curl block exactly as shown.
+- `Upload Files`: appears for multipart `-F` requests, lets users attach browser files for non-generated `@...` multipart parts, and keeps generated `@R&{...}` parts on the built-in synthetic-file path.
 - `Export Curls`: exports all docs grouped by markdown file as Insomnia, Postman, or Hoppscotch JSON, including current env values.
+
+Browser-selected uploads are limited to `10 MB` per file and `25 MB` total per run.
 
 Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your running DocCurl app URL so the built-in self-test pages can run without another service.
 
-| Name                                               | Supported | Plans to add                               | Priority |
-| -------------------------------------------------- | --------- | ------------------------------------------ | -------- |
-| REST over HTTP/HTTPS                               | Yes       | No specific change needed                  | x        |
-| GraphQL over HTTP                                  | Yes       | No specific change needed                  | x        |
-| SOAP over HTTP                                     | Yes       | No specific change needed                  | x        |
-| JSON request/response APIs                         | Yes       | No specific change needed                  | x        |
-| XML request/response APIs                          | Yes       | No specific change needed                  | x        |
-| Query params in URL                                | Yes       | No specific change needed                  | x        |
-| Standard body data via `-d` / `--data-*`           | Yes       | No specific change needed                  | x        |
-| Multipart text fields like `-F "field=value"`      | Yes       | No specific change needed                  | x        |
-| Generated file uploads like `-F "file=@R&{x.pdf}"` | Yes       | Improve ergonomics later; not planned      | low      |
-| Auth headers / API keys / Bearer tokens            | Yes       | No specific change needed                  | x        |
-| Localhost/private targets in `--dev`               | Yes       | No specific change needed                  | x        |
-| WebSockets                                         | No        | Planned; likely via `websocat`             | high     |
-| GraphQL subscriptions                              | No        | Planned; likely via `graphql-transport-ws` | low      |
-| gRPC                                               | No        | Not planned yet                            | medium   |
-| Real local file uploads like `@/tmp/file.pdf`      | No        | Planned                                    | high     |
-| Redirect following with `-L`                       | No        | Not planned yet                            | low      |
-| Proxy support                                      | No        | Not planned yet                            | low      |
-| Cookie jar / session persistence workflows         | No        | Not planned yet                            | medium   |
-| Long-lived streaming / interactive flows           | No        | Not planned yet                            | medium   |
-| Client cert / mTLS curl flows                      | No        | Not planned yet                            | low      |
-| WebRTC                                             | No        | Planned;                                   | very low |
+| Name                                                   | Supported | Plans to add                               | Priority |
+| ------------------------------------------------------ | --------- | ------------------------------------------ | -------- |
+| REST over HTTP/HTTPS                                   | Yes       | No specific change needed                  | x        |
+| GraphQL over HTTP                                      | Yes       | No specific change needed                  | x        |
+| SOAP over HTTP                                         | Yes       | No specific change needed                  | x        |
+| JSON request/response APIs                             | Yes       | No specific change needed                  | x        |
+| XML request/response APIs                              | Yes       | No specific change needed                  | x        |
+| Query params in URL                                    | Yes       | No specific change needed                  | x        |
+| Standard body data via `-d` / `--data-*`               | Yes       | No specific change needed                  | x        |
+| Multipart text fields like `-F "field=value"`          | Yes       | No specific change needed                  | x        |
+| Generated file uploads like `-F "file=@R&{x.pdf}"`     | Yes       | No specific change needed                  | x        |
+| Browser multipart uploads like `-F "file=@/tmp/x.pdf"` | Yes       | No specific change needed                  | x        |
+| Auth headers / API keys / Bearer tokens                | Yes       | No specific change needed                  | x        |
+| Localhost/private targets in `--dev`                   | Yes       | No specific change needed                  | x        |
+| WebSockets                                             | No        | Planned; likely via `websocat`             | high     |
+| GraphQL subscriptions                                  | No        | Planned; likely via `graphql-transport-ws` | low      |
+| gRPC                                                   | No        | Not planned yet                            | medium   |
+| Browser-mapped multipart uploads using `@...` tokens   | Yes       | No specific change needed                  | x        |
+| Redirect following with `-L`                           | No        | Not planned yet                            | low      |
+| Proxy support                                          | No        | Not planned yet                            | low      |
+| Cookie jar / session persistence workflows             | No        | Not planned yet                            | medium   |
+| Long-lived streaming / interactive flows               | No        | Not planned yet                            | medium   |
+| Client cert / mTLS curl flows                          | No        | Not planned yet                            | low      |
+| WebRTC                                                 | No        | Planned;                                   | very low |
 
 ## Built-in Self-Test Docs
 
@@ -176,7 +180,13 @@ Key controls:
 - Request/response limits (headers/body/output/timeouts).
 - Authentication for API/docs routes when password is enabled.
 
-Multipart form fields support normal text parts like `field=value` and DocCurl-managed generated file parts in the form `field=@R&{filename.ext}`. Supported generated file extensions are `png`, `jpg`, `jpeg`, `webp`, `gif`, `avif`, `mp4`, `webm`, and `pdf`.
+Multipart form fields support:
+
+- text parts like `field=value`
+- DocCurl-managed generated file parts like `field=@R&{filename.ext}`
+- browser-selected file parts like `field=@/tmp/file.pdf` or `field=@avatar.png`
+
+Generated uploads support `png`, `jpg`, `jpeg`, `webp`, `gif`, `avif`, `mp4`, `webm`, and `pdf`. Browser-selected uploads are limited to `10 MB` per file and `25 MB` total per run. Advanced curl multipart file modifiers such as `;type=` and `;filename=` are still unsupported.
 
 ## API Endpoints
 

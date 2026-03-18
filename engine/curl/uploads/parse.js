@@ -26,9 +26,22 @@ export function parseMultipartFormPart(rawValue) {
     }
 
     if (fieldValue.startsWith("@")) {
-      throw new Error(
-        "Multipart file uploads only support generated files in the form field=@R&{filename.ext}",
-      );
+      const uploadValue = fieldValue.slice(1).trim();
+      if (!uploadValue) {
+        throw new Error("Multipart upload reference cannot be empty");
+      }
+      if (uploadValue.includes(";")) {
+        throw new Error(
+          "Multipart upload modifiers like ;type= and ;filename= are not supported",
+        );
+      }
+
+      return {
+        name: fieldName,
+        source: "upload",
+        uploadReference: uploadValue,
+        filename: path.posix.basename(uploadValue),
+      };
     }
 
     return {
@@ -47,12 +60,16 @@ export function parseMultipartFormPart(rawValue) {
     throw new Error("Generated upload filename cannot be empty");
   }
   if (filename.includes("/") || filename.includes("\\")) {
-    throw new Error("Generated upload filename must not include path separators");
+    throw new Error(
+      "Generated upload filename must not include path separators",
+    );
   }
 
   const extensionIndex = filename.lastIndexOf(".");
   if (extensionIndex <= 0 || extensionIndex === filename.length - 1) {
-    throw new Error("Generated upload filename must include a supported extension");
+    throw new Error(
+      "Generated upload filename must include a supported extension",
+    );
   }
 
   const extension = filename.slice(extensionIndex + 1).toLowerCase();

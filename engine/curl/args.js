@@ -30,7 +30,7 @@ export function buildCurlArgs(spec) {
   }
 
   for (const formPart of spec.formParts || []) {
-    if (formPart.source === "generated") {
+    if (formPart.source === "generated" || formPart.source === "upload") {
       const filePath =
         typeof formPart.filePath === "string" && formPart.filePath
           ? formPart.filePath

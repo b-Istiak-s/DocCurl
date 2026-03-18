@@ -30,6 +30,7 @@ export function parseCurlCommand(command) {
   const headers = [];
   const bodyParts = [];
   const formParts = [];
+  let uploadIndex = 0;
 
   function readNextValue(flag, index) {
     const value = tokens[index + 1];
@@ -112,7 +113,14 @@ export function parseCurlCommand(command) {
       if (bodyParts.length > 0) {
         throw new Error("Multipart form data cannot be mixed with body data");
       }
-      formParts.push(parseMultipartFormPart(readNextValue(token, i)));
+      {
+        const formPart = parseMultipartFormPart(readNextValue(token, i));
+        if (formPart.source === "upload") {
+          formPart.uploadIndex = uploadIndex;
+          uploadIndex += 1;
+        }
+        formParts.push(formPart);
+      }
       i += 1;
       continue;
     }
@@ -121,7 +129,14 @@ export function parseCurlCommand(command) {
       if (bodyParts.length > 0) {
         throw new Error("Multipart form data cannot be mixed with body data");
       }
-      formParts.push(parseMultipartFormPart(token.slice("--form=".length)));
+      {
+        const formPart = parseMultipartFormPart(token.slice("--form=".length));
+        if (formPart.source === "upload") {
+          formPart.uploadIndex = uploadIndex;
+          uploadIndex += 1;
+        }
+        formParts.push(formPart);
+      }
       continue;
     }
 
@@ -129,7 +144,14 @@ export function parseCurlCommand(command) {
       if (bodyParts.length > 0) {
         throw new Error("Multipart form data cannot be mixed with body data");
       }
-      formParts.push(parseMultipartFormPart(token.slice(2)));
+      {
+        const formPart = parseMultipartFormPart(token.slice(2));
+        if (formPart.source === "upload") {
+          formPart.uploadIndex = uploadIndex;
+          uploadIndex += 1;
+        }
+        formParts.push(formPart);
+      }
       continue;
     }
 

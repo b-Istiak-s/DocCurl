@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fs from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import express from "express";
 import {
   CURL_RESPONSE_META_END,
@@ -17,6 +20,15 @@ import {
 let portsBlocked = false;
 let portsChecked = false;
 let printedPortWarning = false;
+
+async function withTempDir(prefix, run) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  try {
+    return await run(tempDir);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
 
 async function checkPortBinding() {
   return new Promise((resolve) => {
@@ -105,6 +117,38 @@ test("parseCurlCommand preserves full multiline JSON body", () => {
   );
 });
 
+test("parseCurlCommand accepts CRLF multiline curl commands pasted from Windows editors", () => {
+  const command =
+    'curl \\\r\n' +
+    '  -X POST \\\r\n' +
+    '  "https://api.example.com/documents" \\\r\n' +
+    '  -H "Authorization: Bearer $TOKEN" \\\r\n' +
+    '  -F "compliance_item_id=1" \\\r\n' +
+    '  -F "file=@/path/to/license.pdf"';
+
+  const parsed = parseCurlCommand(command);
+
+  assert.equal(parsed.method, "POST");
+  assert.equal(parsed.url, "https://api.example.com/documents");
+  assert.deepEqual(parsed.headers, [
+    { name: "Authorization", value: "Bearer $TOKEN" },
+  ]);
+  assert.deepEqual(parsed.formParts, [
+    {
+      name: "compliance_item_id",
+      value: "1",
+      source: "text",
+    },
+    {
+      name: "file",
+      source: "upload",
+      uploadReference: "/path/to/license.pdf",
+      filename: "license.pdf",
+      uploadIndex: 0,
+    },
+  ]);
+});
+
 test("parseCurlCommand parses quoted URL and headers", () => {
   const parsed = parseCurlCommand(
     'curl --url "https://api.example.com:8443/users" -H "Authorization: Bearer abc123"',
@@ -115,13 +159,6 @@ test("parseCurlCommand parses quoted URL and headers", () => {
   assert.deepEqual(parsed.headers, [
     { name: "Authorization", value: "Bearer abc123" },
   ]);
-});
-
-test("parseCurlCommand rejects multipart form flags", () => {
-  assert.throws(
-    () => parseCurlCommand('curl -F "file=@/tmp/x.pdf" https://api.example.com'),
-    /generated files/i,
-  );
 });
 
 test("parseCurlCommand accepts generated multipart uploads and infers POST", () => {
@@ -161,6 +198,30 @@ test("parseCurlCommand accepts text and generated multipart fields together", ()
   ]);
 });
 
+test("parseCurlCommand accepts browser-upload-backed multipart fields", () => {
+  const parsed = parseCurlCommand(
+    'curl -F "documents[]=@/tmp/license.pdf" -F "avatar=@local-avatar.png" https://api.example.com',
+  );
+
+  assert.equal(parsed.method, "POST");
+  assert.deepEqual(parsed.formParts, [
+    {
+      name: "documents[]",
+      source: "upload",
+      uploadReference: "/tmp/license.pdf",
+      filename: "license.pdf",
+      uploadIndex: 0,
+    },
+    {
+      name: "avatar",
+      source: "upload",
+      uploadReference: "local-avatar.png",
+      filename: "local-avatar.png",
+      uploadIndex: 1,
+    },
+  ]);
+});
+
 test("parseCurlCommand rejects unsupported generated upload extensions", () => {
   assert.throws(
     () => parseCurlCommand('curl -F "avatar=@R&{avatar.exe}" https://api.example.com'),
@@ -168,10 +229,10 @@ test("parseCurlCommand rejects unsupported generated upload extensions", () => {
   );
 });
 
-test("parseCurlCommand still rejects real file paths in multipart fields", () => {
+test("parseCurlCommand rejects unsupported multipart file modifiers", () => {
   assert.throws(
-    () => parseCurlCommand('curl -F "avatar=@/tmp/x.pdf" https://api.example.com'),
-    /only support generated files/i,
+    () => parseCurlCommand('curl -F "avatar=@/tmp/x.pdf;type=application/pdf" https://api.example.com'),
+    /not supported/i,
   );
 });
 
@@ -379,6 +440,316 @@ test("POST /api/run-curl mounts generated multipart uploads and rewrites curl ar
   });
 });
 
+test("POST /api/run-curl accepts browser multipart uploads and mounts them by upload index", async () => {
+  const calls = [];
+  const inspectedUploads = [];
+
+  const started = await withTempDir("doccurl-upload-browser-", async (uploadTempDir) =>
+    withServer(
+      {
+        isDev: false,
+        dnsLookup: async () => [{ address: "8.8.8.8" }],
+        uploadFsMkdtemp: async () => uploadTempDir,
+        execFileImpl: (command, args, _options, callback) => {
+          calls.push({ command, args });
+
+          void fs
+            .readFile(path.join(uploadTempDir, "Therapy_License.pdf"), "utf8")
+            .then((value) => {
+              inspectedUploads.push({
+                filePath: path.join(uploadTempDir, "Therapy_License.pdf"),
+                value,
+              });
+              callback(null, "ok", "");
+            }, callback);
+        },
+      },
+      async (baseUrl) => {
+        const formData = new FormData();
+        formData.append(
+          "command",
+          'curl -F "company_id=1" -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+        );
+        formData.append(
+          "upload_0",
+          new Blob(["browser-file"], { type: "application/pdf" }),
+          "Therapy License.pdf",
+        );
+        formData.append(
+          "upload_99",
+          new Blob(["ignored"], { type: "text/plain" }),
+          "ignored.txt",
+        );
+
+        const response = await fetch(`${baseUrl}/api/run-curl`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        assert.equal(response.status, 200);
+        assert.equal(data.success, true);
+      },
+    ),
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(calls.length, 1);
+  const formFlags = calls[0].args.filter((value, index, array) => array[index - 1] === "-F");
+  assert.deepEqual(formFlags, [
+    "company_id=1",
+    "documents[]=@/tmp/doccurl-uploads/Therapy_License.pdf",
+  ]);
+  assert.deepEqual(inspectedUploads, [
+    {
+      filePath: path.join(calls[0].args[calls[0].args.indexOf("-v") + 1].split(":")[0], "Therapy_License.pdf"),
+      value: "browser-file",
+    },
+  ]);
+});
+
+test("POST /api/run-curl rejects browser-upload-backed multipart fields when files are missing", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: () => {
+        throw new Error("exec should not run when upload is missing");
+      },
+    },
+    async (baseUrl) => {
+      const formData = new FormData();
+      formData.append(
+        "command",
+        'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+      );
+
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 400);
+      assert.match(data.error, /missing uploaded file/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl rejects multipart uploads once streamed total size exceeds the limit", async () => {
+  const removals = [];
+  const started = await withTempDir("doccurl-upload-total-limit-", async (uploadTempDir) =>
+    withServer(
+      {
+        isDev: false,
+        dnsLookup: async () => [{ address: "8.8.8.8" }],
+        uploadLimits: {
+          maxUploadTotalBytes: 5,
+        },
+        uploadFsMkdtemp: async () => uploadTempDir,
+        uploadFsRm: async (targetPath, options) => {
+          removals.push({ targetPath, options });
+          await fs.rm(targetPath, options);
+        },
+        execFileImpl: () => {
+          throw new Error("exec should not run when upload total exceeds the limit");
+        },
+      },
+      async (baseUrl) => {
+        const formData = new FormData();
+        formData.append(
+          "command",
+          'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+        );
+        formData.append(
+          "upload_0",
+          new Blob(["abc"], { type: "application/pdf" }),
+          "license.pdf",
+        );
+        formData.append(
+          "upload_99",
+          new Blob(["def"], { type: "text/plain" }),
+          "ignored.txt",
+        );
+
+        const response = await fetch(`${baseUrl}/api/run-curl`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+
+        assert.equal(response.status, 400);
+        assert.match(data.error, /must total/i);
+      },
+    ),
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: removals[0].targetPath,
+    options: { recursive: true, force: true },
+  });
+});
+
+test("POST /api/run-curl rejects multipart uploads once a streamed file exceeds the per-file limit", async () => {
+  const started = await withTempDir("doccurl-upload-file-limit-", async (uploadTempDir) =>
+    withServer(
+      {
+        isDev: false,
+        dnsLookup: async () => [{ address: "8.8.8.8" }],
+        uploadLimits: {
+          maxUploadFileBytes: 5,
+          maxUploadTotalBytes: 50,
+        },
+        uploadFsMkdtemp: async () => uploadTempDir,
+        execFileImpl: () => {
+          throw new Error("exec should not run when upload file exceeds the limit");
+        },
+      },
+      async (baseUrl) => {
+        const formData = new FormData();
+        formData.append(
+          "command",
+          'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+        );
+        formData.append(
+          "upload_0",
+          new Blob(["123456"], { type: "application/pdf" }),
+          "license.pdf",
+        );
+
+        const response = await fetch(`${baseUrl}/api/run-curl`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+
+        assert.equal(response.status, 400);
+        assert.match(data.error, /each uploaded file must be/i);
+      },
+    ),
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl rejects unexpected multipart text fields during streaming parse", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: () => {
+        throw new Error("exec should not run when multipart fields are invalid");
+      },
+    },
+    async (baseUrl) => {
+      const formData = new FormData();
+      formData.append(
+        "command",
+        'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+      );
+      formData.append("extra", "unexpected");
+
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 400);
+      assert.match(data.error, /unexpected multipart fields/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl cleans up upload temp dirs when multipart parser setup throws", async () => {
+  const removals = [];
+  let uploadTempDir;
+  const started = await withTempDir("doccurl-upload-parser-setup-", async (tempDir) => {
+    uploadTempDir = tempDir;
+    return withServer(
+      {
+        isDev: false,
+        dnsLookup: async () => [{ address: "8.8.8.8" }],
+        uploadFsMkdtemp: async () => uploadTempDir,
+        uploadFsMkdir: async () => {},
+        uploadFsRm: async (targetPath, options) => {
+          removals.push({ targetPath, options });
+          await fs.rm(targetPath, options);
+        },
+        BusboyImpl: () => {
+          throw new Error("Multipart boundary missing");
+        },
+        execFileImpl: () => {
+          throw new Error("exec should not run when multipart parser setup fails");
+        },
+      },
+      async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/run-curl`, {
+          method: "POST",
+          headers: { "Content-Type": "multipart/form-data" },
+          body: "--ignored--",
+        });
+        const data = await response.json();
+
+        assert.equal(response.status, 400);
+        assert.match(data.error, /multipart boundary missing/i);
+      },
+    );
+  });
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: uploadTempDir,
+    options: { recursive: true, force: true },
+  });
+});
+
+test("POST /api/run-curl rejects oversized multipart command fields during streaming parse", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadLimits: {
+        maxCommandLength: 10,
+      },
+      execFileImpl: () => {
+        throw new Error("exec should not run when multipart command field is too large");
+      },
+    },
+    async (baseUrl) => {
+      const formData = new FormData();
+      formData.append("command", 'curl "https://api.example.com/upload"');
+
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 400);
+      assert.match(data.error, /curl command field is too large/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
 test("POST /api/run-curl keeps multipart text fields while mounting generated uploads", async () => {
   const calls = [];
   const writes = [];
@@ -470,6 +841,49 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
   assert.equal(removals.length, 1);
   assert.deepEqual(removals[0], {
     targetPath: "/tmp/doccurl-upload-failure",
+    options: { recursive: true, force: true },
+  });
+});
+
+test("POST /api/run-curl cleans up generated uploads when mount preparation fails", async () => {
+  const removals = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadTmpDir: "/tmp",
+      uploadFsMkdtemp: async () => "/tmp/doccurl-upload-prepare-failure",
+      uploadFsWriteFile: async () => {
+        throw new Error("write failed");
+      },
+      uploadFsChmod: async () => {},
+      uploadFsRm: async (targetPath, options) => {
+        removals.push({ targetPath, options });
+      },
+      execFileImpl: () => {
+        throw new Error("exec should not run when mount preparation fails");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 400);
+      assert.match(data.error, /write failed/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: "/tmp/doccurl-upload-prepare-failure",
     options: { recursive: true, force: true },
   });
 });

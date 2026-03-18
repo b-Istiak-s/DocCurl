@@ -28,6 +28,24 @@ function parseFormToken(rawFormValue) {
     };
   }
 
+  const uploadFileMatch = value.match(/^([^=]+)=@(.+)$/);
+  if (uploadFileMatch) {
+    const uploadValue = uploadFileMatch[2].trim();
+    if (!uploadValue || uploadValue.includes(";")) {
+      throw new Error(`Unsupported multipart file token: ${rawFormValue}`);
+    }
+
+    const segments = uploadValue.split(/[\\/]/).filter(Boolean);
+    const filename = segments[segments.length - 1] || uploadValue;
+
+    return {
+      name: uploadFileMatch[1].trim(),
+      type: "file",
+      value: `@${uploadValue}`,
+      filename,
+    };
+  }
+
   const textMatch = value.match(/^([^=]+)=(.*)$/);
   if (textMatch) {
     return {
