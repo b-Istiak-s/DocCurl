@@ -397,6 +397,23 @@ function createUploadFieldName(uploadIndex) {
   return `upload_${uploadIndex}`;
 }
 
+function createUploadInputId(uploadIndex) {
+  return `curl-upload-input-${uploadIndex}`;
+}
+
+function createUploadLabelText(parts, part) {
+  const matchingParts = parts.filter((candidate) => candidate.name === part.name);
+  if (matchingParts.length <= 1) {
+    return part.name;
+  }
+
+  const position = matchingParts.findIndex(
+    (candidate) => candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
+  );
+
+  return `${part.name} (${position + 1})`;
+}
+
 function sumUploadSizes(files) {
   let total = 0;
   for (const file of files.values()) {
@@ -917,15 +934,17 @@ export function createPlaygroundSystem({
 
       const nameCell = state.documentRef.createElement("div");
       nameCell.className = "curlUploadNameCell";
-      const nameText = state.documentRef.createElement("span");
+      const nameText = state.documentRef.createElement("label");
       nameText.className = "curlUploadFieldName";
-      nameText.textContent = part.name;
+      nameText.textContent = createUploadLabelText(state.multipartMetadata.uploadParts, part);
 
       const fileCell = state.documentRef.createElement("div");
       fileCell.className = "curlUploadFileCell";
       const fileInput = state.documentRef.createElement("input");
       fileInput.className = "curlUploadInput";
       fileInput.type = "file";
+      fileInput.id = createUploadInputId(part.uploadIndex);
+      nameText.setAttribute("for", fileInput.id);
 
       const fileMeta = state.documentRef.createElement("div");
       fileMeta.className = "curlUploadMeta";

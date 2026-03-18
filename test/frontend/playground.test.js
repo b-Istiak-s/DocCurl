@@ -603,11 +603,68 @@ test("upload overlay opens and closes for upload-backed multipart rows without r
     assert.equal(requestEditorView.hidden, true);
     assert.equal(rows.length, 1);
     assert.equal(fieldNames[0].textContent, "documents[]");
+    assert.equal(fieldNames[0].tagName, "LABEL");
+
+    const fileInput = docContent.querySelector(".curlUploadInput");
+    assert.equal(fileInput.id, "curl-upload-input-0");
+    assert.equal(fieldNames[0].getAttribute("for"), fileInput.id);
 
     hideUploadsButton.click();
 
     assert.equal(uploadPanel.hidden, true);
     assert.equal(requestEditorView.hidden, false);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("upload-backed multipart rows use distinct labels for repeated field names", () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock(
+        'curl -F "documents[]=@/tmp/license.pdf" -F "documents[]=@/tmp/certificate.pdf" https://api.example.com/upload',
+      ),
+    );
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    docContent.querySelector(".uploadToggleBtn").click();
+
+    const fieldNames = docContent.querySelectorAll(".curlUploadFieldName");
+    const fileInputs = docContent.querySelectorAll(".curlUploadInput");
+
+    assert.deepEqual(
+      fieldNames.map((element) => element.textContent),
+      ["documents[] (1)", "documents[] (2)"],
+    );
+    assert.equal(fieldNames[0].getAttribute("for"), fileInputs[0].id);
+    assert.equal(fieldNames[1].getAttribute("for"), fileInputs[1].id);
+    assert.equal(fileInputs[0].id, "curl-upload-input-0");
+    assert.equal(fileInputs[1].id, "curl-upload-input-1");
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
