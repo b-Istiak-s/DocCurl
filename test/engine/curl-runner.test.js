@@ -673,6 +673,52 @@ test("POST /api/run-curl rejects unexpected multipart text fields during streami
   }
 });
 
+test("POST /api/run-curl cleans up upload temp dirs when multipart parser setup throws", async () => {
+  const removals = [];
+  let uploadTempDir;
+  const started = await withTempDir("doccurl-upload-parser-setup-", async (tempDir) => {
+    uploadTempDir = tempDir;
+    return withServer(
+      {
+        isDev: false,
+        dnsLookup: async () => [{ address: "8.8.8.8" }],
+        uploadFsMkdtemp: async () => uploadTempDir,
+        uploadFsMkdir: async () => {},
+        uploadFsRm: async (targetPath, options) => {
+          removals.push({ targetPath, options });
+          await fs.rm(targetPath, options);
+        },
+        BusboyImpl: () => {
+          throw new Error("Multipart boundary missing");
+        },
+        execFileImpl: () => {
+          throw new Error("exec should not run when multipart parser setup fails");
+        },
+      },
+      async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/run-curl`, {
+          method: "POST",
+          headers: { "Content-Type": "multipart/form-data" },
+          body: "--ignored--",
+        });
+        const data = await response.json();
+
+        assert.equal(response.status, 400);
+        assert.match(data.error, /multipart boundary missing/i);
+      },
+    );
+  });
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: uploadTempDir,
+    options: { recursive: true, force: true },
+  });
+});
+
 test("POST /api/run-curl rejects oversized multipart command fields during streaming parse", async () => {
   const started = await withServer(
     {

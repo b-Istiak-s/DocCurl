@@ -41,9 +41,28 @@ export async function parseMultipartUploadRequest(
     logger = console,
   } = {},
 ) {
-  const tempDir = await mkdtempImpl(path.join(tmpDir, "doccurl-upload-"));
-  const incomingDir = path.join(tempDir, INCOMING_UPLOAD_DIR);
-  await mkdirImpl(incomingDir, { recursive: true });
+  let tempDir;
+  let incomingDir;
+  let parser;
+
+  try {
+    tempDir = await mkdtempImpl(path.join(tmpDir, "doccurl-upload-"));
+    incomingDir = path.join(tempDir, INCOMING_UPLOAD_DIR);
+    await mkdirImpl(incomingDir, { recursive: true });
+    parser = BusboyImpl({
+      headers: req.headers,
+      limits: {
+        files: limits.maxFormParts,
+        fields: 1,
+        fieldSize: limits.maxCommandLength,
+      },
+    });
+  } catch (error) {
+    if (tempDir) {
+      await rmImpl(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+    throw error;
+  }
 
   let cleanedUp = false;
   const cleanup = async () => {
@@ -62,15 +81,6 @@ export async function parseMultipartUploadRequest(
       });
     }
   };
-
-  const parser = BusboyImpl({
-    headers: req.headers,
-    limits: {
-      files: limits.maxFormParts,
-      fields: 1,
-      fieldSize: limits.maxCommandLength,
-    },
-  });
 
   return new Promise((resolve, reject) => {
     const body = {};
