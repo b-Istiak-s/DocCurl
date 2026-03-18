@@ -150,7 +150,7 @@ Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your 
 | WebSockets                                             | No        | Planned; likely via `websocat`             | high     |
 | GraphQL subscriptions                                  | No        | Planned; likely via `graphql-transport-ws` | low      |
 | gRPC                                                   | No        | Not planned yet                            | medium   |
-| Real local file uploads like `@/tmp/file.pdf`          | Yes       | No specific change needed                  | x        |
+| Browser-mapped multipart uploads using `@...` tokens   | Yes       | No specific change needed                  | x        |
 | Redirect following with `-L`                           | No        | Not planned yet                            | low      |
 | Proxy support                                          | No        | Not planned yet                            | low      |
 | Cookie jar / session persistence workflows             | No        | Not planned yet                            | medium   |

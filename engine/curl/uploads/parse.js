@@ -1,7 +1,6 @@
 import path from "node:path";
 import {
   GENERATED_FILE_EXTENSIONS,
-  GENERIC_UPLOAD_TOKEN_PATTERN,
   GENERATED_UPLOAD_TOKEN_PATTERN,
 } from "./constants.js";
 
@@ -12,7 +11,6 @@ function normalizeGeneratedFilename(filename) {
 export function parseMultipartFormPart(rawValue) {
   const value = String(rawValue || "").trim();
   const match = value.match(GENERATED_UPLOAD_TOKEN_PATTERN);
-  const genericUploadMatch = value.match(GENERIC_UPLOAD_TOKEN_PATTERN);
 
   if (!value.includes("=")) {
     throw new Error("Multipart field must use the form name=value");
@@ -62,12 +60,16 @@ export function parseMultipartFormPart(rawValue) {
     throw new Error("Generated upload filename cannot be empty");
   }
   if (filename.includes("/") || filename.includes("\\")) {
-    throw new Error("Generated upload filename must not include path separators");
+    throw new Error(
+      "Generated upload filename must not include path separators",
+    );
   }
 
   const extensionIndex = filename.lastIndexOf(".");
   if (extensionIndex <= 0 || extensionIndex === filename.length - 1) {
-    throw new Error("Generated upload filename must include a supported extension");
+    throw new Error(
+      "Generated upload filename must include a supported extension",
+    );
   }
 
   const extension = filename.slice(extensionIndex + 1).toLowerCase();

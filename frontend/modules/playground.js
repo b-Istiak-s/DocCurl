@@ -397,6 +397,74 @@ function createUploadFieldName(uploadIndex) {
   return `upload_${uploadIndex}`;
 }
 
+function createUploadInputId(blockId, uploadIndex) {
+  return `${blockId}-upload-${uploadIndex}`;
+}
+
+function createUploadLabelText(parts, part) {
+  const matchingParts = parts.filter((candidate) => candidate.name === part.name);
+  if (matchingParts.length <= 1) {
+    return part.name;
+  }
+
+  const position = matchingParts.findIndex(
+    (candidate) => candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
+  );
+
+  return `${part.name} (${position + 1})`;
+}
+
+function mapSelectedUploadsToParts(previousParts, selectedUploadFiles, nextParts) {
+  const nextSelectedFiles = new Map();
+  const usedPreviousIndices = new Set();
+
+  const assignFile = (nextPart, previousPart) => {
+    const selectedFile = selectedUploadFiles.get(previousPart.uploadIndex);
+    if (!selectedFile || usedPreviousIndices.has(previousPart.uploadIndex)) {
+      return false;
+    }
+
+    usedPreviousIndices.add(previousPart.uploadIndex);
+    nextSelectedFiles.set(nextPart.uploadIndex, selectedFile);
+    return true;
+  };
+
+  for (const nextPart of nextParts) {
+    const matchingPart = previousParts.find(
+      (candidate) =>
+        candidate.signature === nextPart.signature &&
+        !usedPreviousIndices.has(candidate.uploadIndex),
+    );
+
+    if (matchingPart && assignFile(nextPart, matchingPart)) {
+      continue;
+    }
+
+    const nextPartPosition = nextParts
+      .slice(0, nextParts.indexOf(nextPart) + 1)
+      .filter((candidate) => candidate.name === nextPart.name).length;
+    const matchingNamePart = previousParts
+      .filter((candidate) => candidate.name === nextPart.name)
+      [nextPartPosition - 1];
+
+    if (matchingNamePart && assignFile(nextPart, matchingNamePart)) {
+      continue;
+    }
+
+    const matchingIndexPart = previousParts.find(
+      (candidate) =>
+        candidate.uploadIndex === nextPart.uploadIndex &&
+        !usedPreviousIndices.has(candidate.uploadIndex),
+    );
+
+    if (matchingIndexPart) {
+      assignFile(nextPart, matchingIndexPart);
+    }
+  }
+
+  return nextSelectedFiles;
+}
+
 function sumUploadSizes(files) {
   let total = 0;
   for (const file of files.values()) {
@@ -887,25 +955,11 @@ export function createPlaygroundSystem({
   }
 
   function syncSelectedUploads(state, multipartMetadata) {
-    const nextSelectedFiles = new Map();
-    const previousParts = state.multipartMetadata?.uploadParts || [];
-
-    multipartMetadata.uploadParts.forEach((part) => {
-      const previousPart = previousParts.find(
-        (candidate) =>
-          candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
-      );
-      if (!previousPart) {
-        return;
-      }
-
-      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
-      if (selectedFile) {
-        nextSelectedFiles.set(part.uploadIndex, selectedFile);
-      }
-    });
-
-    state.selectedUploadFiles = nextSelectedFiles;
+    state.selectedUploadFiles = mapSelectedUploadsToParts(
+      state.multipartMetadata?.uploadParts || [],
+      state.selectedUploadFiles,
+      multipartMetadata.uploadParts,
+    );
   }
 
   function renderUploadRows(state) {
@@ -917,15 +971,17 @@ export function createPlaygroundSystem({
 
       const nameCell = state.documentRef.createElement("div");
       nameCell.className = "curlUploadNameCell";
-      const nameText = state.documentRef.createElement("span");
+      const nameText = state.documentRef.createElement("label");
       nameText.className = "curlUploadFieldName";
-      nameText.textContent = part.name;
+      nameText.textContent = createUploadLabelText(state.multipartMetadata.uploadParts, part);
 
       const fileCell = state.documentRef.createElement("div");
       fileCell.className = "curlUploadFileCell";
       const fileInput = state.documentRef.createElement("input");
       fileInput.className = "curlUploadInput";
       fileInput.type = "file";
+      fileInput.id = createUploadInputId(state.blockId, part.uploadIndex);
+      nameText.setAttribute("for", fileInput.id);
 
       const fileMeta = state.documentRef.createElement("div");
       fileMeta.className = "curlUploadMeta";
@@ -1014,11 +1070,19 @@ export function createPlaygroundSystem({
   }
 
   function buildRunRequest(command, state) {
+    const resolvedMultipartMetadata = parseCurlMultipartMetadata(command);
+    const resolvedSelectedFiles = mapSelectedUploadsToParts(
+      state.multipartMetadata.uploadParts,
+      state.selectedUploadFiles,
+      resolvedMultipartMetadata.uploadParts,
+    );
     const relevantFiles = new Map();
 
-    for (const part of state.multipartMetadata.uploadParts) {
-      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
+    for (const part of resolvedMultipartMetadata.uploadParts) {
+      const selectedFile = resolvedSelectedFiles.get(part.uploadIndex);
       if (!selectedFile) {
+        state.multipartMetadata = resolvedMultipartMetadata;
+        state.selectedUploadFiles = resolvedSelectedFiles;
         setUploadPanelOpen(state, true);
         setUploadValidationMessage(
           state,
@@ -1028,6 +1092,8 @@ export function createPlaygroundSystem({
         return null;
       }
       if (selectedFile.size > UPLOAD_LIMITS.maxFileBytes) {
+        state.multipartMetadata = resolvedMultipartMetadata;
+        state.selectedUploadFiles = resolvedSelectedFiles;
         setUploadPanelOpen(state, true);
         setUploadValidationMessage(
           state,
@@ -1040,6 +1106,8 @@ export function createPlaygroundSystem({
     }
 
     if (sumUploadSizes(relevantFiles) > UPLOAD_LIMITS.maxTotalBytes) {
+      state.multipartMetadata = resolvedMultipartMetadata;
+      state.selectedUploadFiles = resolvedSelectedFiles;
       setUploadPanelOpen(state, true);
       setUploadValidationMessage(
         state,
@@ -1060,7 +1128,7 @@ export function createPlaygroundSystem({
 
     const formData = new FormDataRef();
     formData.append("command", command);
-    for (const part of state.multipartMetadata.uploadParts) {
+    for (const part of resolvedMultipartMetadata.uploadParts) {
       const file = relevantFiles.get(part.uploadIndex);
       formData.append(createUploadFieldName(part.uploadIndex), file, file.name);
     }
