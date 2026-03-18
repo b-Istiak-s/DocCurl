@@ -606,7 +606,11 @@ test("upload overlay opens and closes for upload-backed multipart rows without r
     assert.equal(fieldNames[0].tagName, "LABEL");
 
     const fileInput = docContent.querySelector(".curlUploadInput");
-    assert.equal(fileInput.id, "curl-upload-input-0");
+    const playground = docContent.querySelector(".curlPlaygroundInline");
+    assert.equal(
+      fileInput.id,
+      `${playground.dataset.curlBlockId}-upload-0`,
+    );
     assert.equal(fieldNames[0].getAttribute("for"), fileInput.id);
 
     hideUploadsButton.click();
@@ -663,8 +667,60 @@ test("upload-backed multipart rows use distinct labels for repeated field names"
     );
     assert.equal(fieldNames[0].getAttribute("for"), fileInputs[0].id);
     assert.equal(fieldNames[1].getAttribute("for"), fileInputs[1].id);
-    assert.equal(fileInputs[0].id, "curl-upload-input-0");
-    assert.equal(fileInputs[1].id, "curl-upload-input-1");
+    const playground = docContent.querySelector(".curlPlaygroundInline");
+    assert.equal(fileInputs[0].id, `${playground.dataset.curlBlockId}-upload-0`);
+    assert.equal(fileInputs[1].id, `${playground.dataset.curlBlockId}-upload-1`);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("upload-backed inputs use block-scoped ids across multiple playgrounds", () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    const command = 'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload';
+    docContent.append(createCurlBlock(command), createCurlBlock(command));
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const playgrounds = docContent.querySelectorAll(".curlPlaygroundInline");
+    const uploadButtons = docContent.querySelectorAll(".uploadToggleBtn");
+    uploadButtons[0].click();
+    uploadButtons[1].click();
+
+    const labels = docContent.querySelectorAll(".curlUploadFieldName");
+    const fileInputs = docContent.querySelectorAll(".curlUploadInput");
+
+    assert.equal(playgrounds.length, 2);
+    assert.equal(fileInputs.length, 2);
+    assert.equal(fileInputs[0].id, `${playgrounds[0].dataset.curlBlockId}-upload-0`);
+    assert.equal(fileInputs[1].id, `${playgrounds[1].dataset.curlBlockId}-upload-0`);
+    assert.notEqual(fileInputs[0].id, fileInputs[1].id);
+    assert.equal(labels[0].getAttribute("for"), fileInputs[0].id);
+    assert.equal(labels[1].getAttribute("for"), fileInputs[1].id);
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

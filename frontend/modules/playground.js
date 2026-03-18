@@ -397,8 +397,8 @@ function createUploadFieldName(uploadIndex) {
   return `upload_${uploadIndex}`;
 }
 
-function createUploadInputId(uploadIndex) {
-  return `curl-upload-input-${uploadIndex}`;
+function createUploadInputId(blockId, uploadIndex) {
+  return `${blockId}-upload-${uploadIndex}`;
 }
 
 function createUploadLabelText(parts, part) {
@@ -980,7 +980,7 @@ export function createPlaygroundSystem({
       const fileInput = state.documentRef.createElement("input");
       fileInput.className = "curlUploadInput";
       fileInput.type = "file";
-      fileInput.id = createUploadInputId(part.uploadIndex);
+      fileInput.id = createUploadInputId(state.blockId, part.uploadIndex);
       nameText.setAttribute("for", fileInput.id);
 
       const fileMeta = state.documentRef.createElement("div");
