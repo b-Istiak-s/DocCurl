@@ -617,6 +617,49 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
   });
 });
 
+test("POST /api/run-curl cleans up generated uploads when mount preparation fails", async () => {
+  const removals = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      uploadTmpDir: "/tmp",
+      uploadFsMkdtemp: async () => "/tmp/doccurl-upload-prepare-failure",
+      uploadFsWriteFile: async () => {
+        throw new Error("write failed");
+      },
+      uploadFsChmod: async () => {},
+      uploadFsRm: async (targetPath, options) => {
+        removals.push({ targetPath, options });
+      },
+      execFileImpl: () => {
+        throw new Error("exec should not run when mount preparation fails");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 400);
+      assert.match(data.error, /write failed/i);
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(removals.length, 1);
+  assert.deepEqual(removals[0], {
+    targetPath: "/tmp/doccurl-upload-prepare-failure",
+    options: { recursive: true, force: true },
+  });
+});
+
 test("POST /api/run-curl returns upstream status, content type, and timing metadata", async () => {
   const started = await withServer(
     {

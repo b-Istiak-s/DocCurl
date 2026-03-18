@@ -85,31 +85,48 @@ export async function prepareMountedUploads(
   }
 
   const tempDir = await mkdtempImpl(path.join(tmpDir, "doccurl-upload-"));
-  await chmodImpl(tempDir, 0o755);
+  const cleanupTempDir = async () => {
+    try {
+      await rmImpl(tempDir, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn?.("Unable to clean up generated upload temp files", {
+        tempDir,
+        error,
+      });
+    }
+  };
+
   const mountedFilePaths = new Map();
   const usedNames = new Set();
 
-  for (const part of mountableParts) {
-    let fileBytes;
-    let sourceFilename;
+  try {
+    await chmodImpl(tempDir, 0o755);
 
-    if (part.source === "generated") {
-      fileBytes = getGeneratedFileBytes(part.extension);
-      sourceFilename = part.filename;
-    } else {
-      const uploadedFile = uploadFilesByIndex.get(part.uploadIndex);
-      if (!uploadedFile) {
-        throw new Error(`Missing uploaded file for multipart field: ${part.name}`);
+    for (const part of mountableParts) {
+      let fileBytes;
+      let sourceFilename;
+
+      if (part.source === "generated") {
+        fileBytes = getGeneratedFileBytes(part.extension);
+        sourceFilename = part.filename;
+      } else {
+        const uploadedFile = uploadFilesByIndex.get(part.uploadIndex);
+        if (!uploadedFile) {
+          throw new Error(`Missing uploaded file for multipart field: ${part.name}`);
+        }
+        fileBytes = uploadedFile.buffer;
+        sourceFilename = uploadedFile.originalname || part.filename || `upload-${part.uploadIndex}`;
       }
-      fileBytes = uploadedFile.buffer;
-      sourceFilename = uploadedFile.originalname || part.filename || `upload-${part.uploadIndex}`;
-    }
 
-    const mountedFilename = createUniqueMountedFilename(sourceFilename, usedNames);
-    const tempFilePath = path.join(tempDir, mountedFilename);
-    await writeFileImpl(tempFilePath, fileBytes);
-    await chmodImpl(tempFilePath, 0o644);
-    mountedFilePaths.set(part, `${GENERATED_UPLOAD_MOUNT_ROOT}/${mountedFilename}`);
+      const mountedFilename = createUniqueMountedFilename(sourceFilename, usedNames);
+      const tempFilePath = path.join(tempDir, mountedFilename);
+      await writeFileImpl(tempFilePath, fileBytes);
+      await chmodImpl(tempFilePath, 0o644);
+      mountedFilePaths.set(part, `${GENERATED_UPLOAD_MOUNT_ROOT}/${mountedFilename}`);
+    }
+  } catch (error) {
+    await cleanupTempDir();
+    throw error;
   }
 
   return {
@@ -121,14 +138,7 @@ export async function prepareMountedUploads(
       );
     },
     async cleanup() {
-      try {
-        await rmImpl(tempDir, { recursive: true, force: true });
-      } catch (error) {
-        logger.warn?.("Unable to clean up generated upload temp files", {
-          tempDir,
-          error,
-        });
-      }
+      await cleanupTempDir();
     },
   };
 }
