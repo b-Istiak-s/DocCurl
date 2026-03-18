@@ -750,6 +750,88 @@ test("upload-backed multipart curl blocks run until a file is selected and then 
   }
 });
 
+test("env-resolved multipart uploads open the resolved picker UI and use resolved upload order", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock("curl $SECOND $FIRST https://api.example.com/upload"));
+    const apiCalls = [];
+    const documentFile = createFileLike("license.pdf", 1024);
+    const avatarFile = createFileLike("avatar.png", 2048);
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async (_url, options) => {
+        apiCalls.push(options);
+        return { ok: true };
+      },
+      parseJsonSafe: async () => ({
+        success: true,
+        output: '{"ok":true}',
+      }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({
+          FIRST: '-F "avatar=@/tmp/avatar.png"',
+          SECOND: '-F "documents[]=@/tmp/license.pdf"',
+        }),
+      },
+      FormDataRef: MockFormData,
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const runButton = docContent.querySelector(".runBtn");
+    const uploadPanel = docContent.querySelector(".curlUploadPanel");
+    const requestEditorView = docContent.querySelector(".requestEditorView");
+    const uploadRunButton = docContent.querySelector(".uploadRunBtn");
+
+    runButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 0);
+    assert.equal(uploadPanel.hidden, false);
+    assert.equal(requestEditorView.hidden, true);
+    assert.deepEqual(
+      docContent.querySelectorAll(".curlUploadFieldName").map((element) => element.textContent),
+      ["documents[]", "avatar"],
+    );
+
+    const fileInputs = docContent.querySelectorAll(".curlUploadInput");
+    fileInputs[0].files = [documentFile];
+    fileInputs[0].dispatch("change");
+    fileInputs[1].files = [avatarFile];
+    fileInputs[1].dispatch("change");
+
+    uploadRunButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 1);
+    assert.ok(apiCalls[0].body instanceof MockFormData);
+    assert.equal(apiCalls[0].body.entries[0].name, "command");
+    assert.match(apiCalls[0].body.entries[0].value, /documents\[\]=@\/tmp\/license\.pdf/);
+    assert.match(apiCalls[0].body.entries[0].value, /avatar=@\/tmp\/avatar\.png/);
+    assert.deepEqual(apiCalls[0].body.entries.slice(1), [
+      { name: "upload_0", value: documentFile, filename: "license.pdf" },
+      { name: "upload_1", value: avatarFile, filename: "avatar.png" },
+    ]);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
 test("generated multipart curl still runs without browser uploads and keeps JSON payload", async () => {
   const previousDocument = global.document;
   const previousWindow = global.window;

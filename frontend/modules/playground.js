@@ -414,6 +414,57 @@ function createUploadLabelText(parts, part) {
   return `${part.name} (${position + 1})`;
 }
 
+function mapSelectedUploadsToParts(previousParts, selectedUploadFiles, nextParts) {
+  const nextSelectedFiles = new Map();
+  const usedPreviousIndices = new Set();
+
+  const assignFile = (nextPart, previousPart) => {
+    const selectedFile = selectedUploadFiles.get(previousPart.uploadIndex);
+    if (!selectedFile || usedPreviousIndices.has(previousPart.uploadIndex)) {
+      return false;
+    }
+
+    usedPreviousIndices.add(previousPart.uploadIndex);
+    nextSelectedFiles.set(nextPart.uploadIndex, selectedFile);
+    return true;
+  };
+
+  for (const nextPart of nextParts) {
+    const matchingPart = previousParts.find(
+      (candidate) =>
+        candidate.signature === nextPart.signature &&
+        !usedPreviousIndices.has(candidate.uploadIndex),
+    );
+
+    if (matchingPart && assignFile(nextPart, matchingPart)) {
+      continue;
+    }
+
+    const nextPartPosition = nextParts
+      .slice(0, nextParts.indexOf(nextPart) + 1)
+      .filter((candidate) => candidate.name === nextPart.name).length;
+    const matchingNamePart = previousParts
+      .filter((candidate) => candidate.name === nextPart.name)
+      [nextPartPosition - 1];
+
+    if (matchingNamePart && assignFile(nextPart, matchingNamePart)) {
+      continue;
+    }
+
+    const matchingIndexPart = previousParts.find(
+      (candidate) =>
+        candidate.uploadIndex === nextPart.uploadIndex &&
+        !usedPreviousIndices.has(candidate.uploadIndex),
+    );
+
+    if (matchingIndexPart) {
+      assignFile(nextPart, matchingIndexPart);
+    }
+  }
+
+  return nextSelectedFiles;
+}
+
 function sumUploadSizes(files) {
   let total = 0;
   for (const file of files.values()) {
@@ -1033,11 +1084,19 @@ export function createPlaygroundSystem({
   }
 
   function buildRunRequest(command, state) {
+    const resolvedMultipartMetadata = parseCurlMultipartMetadata(command);
+    const resolvedSelectedFiles = mapSelectedUploadsToParts(
+      state.multipartMetadata.uploadParts,
+      state.selectedUploadFiles,
+      resolvedMultipartMetadata.uploadParts,
+    );
     const relevantFiles = new Map();
 
-    for (const part of state.multipartMetadata.uploadParts) {
-      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
+    for (const part of resolvedMultipartMetadata.uploadParts) {
+      const selectedFile = resolvedSelectedFiles.get(part.uploadIndex);
       if (!selectedFile) {
+        state.multipartMetadata = resolvedMultipartMetadata;
+        state.selectedUploadFiles = resolvedSelectedFiles;
         setUploadPanelOpen(state, true);
         setUploadValidationMessage(
           state,
@@ -1047,6 +1106,8 @@ export function createPlaygroundSystem({
         return null;
       }
       if (selectedFile.size > UPLOAD_LIMITS.maxFileBytes) {
+        state.multipartMetadata = resolvedMultipartMetadata;
+        state.selectedUploadFiles = resolvedSelectedFiles;
         setUploadPanelOpen(state, true);
         setUploadValidationMessage(
           state,
@@ -1059,6 +1120,8 @@ export function createPlaygroundSystem({
     }
 
     if (sumUploadSizes(relevantFiles) > UPLOAD_LIMITS.maxTotalBytes) {
+      state.multipartMetadata = resolvedMultipartMetadata;
+      state.selectedUploadFiles = resolvedSelectedFiles;
       setUploadPanelOpen(state, true);
       setUploadValidationMessage(
         state,
@@ -1079,7 +1142,7 @@ export function createPlaygroundSystem({
 
     const formData = new FormDataRef();
     formData.append("command", command);
-    for (const part of state.multipartMetadata.uploadParts) {
+    for (const part of resolvedMultipartMetadata.uploadParts) {
       const file = relevantFiles.get(part.uploadIndex);
       formData.append(createUploadFieldName(part.uploadIndex), file, file.name);
     }
