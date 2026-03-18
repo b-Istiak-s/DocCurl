@@ -62,10 +62,12 @@ export async function prepareMountedUploads(
   formParts,
   uploadFilesByIndex = new Map(),
   {
+    tempDir: existingTempDir = null,
     tmpDir = os.tmpdir(),
     mkdtempImpl = fs.mkdtemp,
     writeFileImpl = fs.writeFile,
     chmodImpl = fs.chmod,
+    renameImpl = fs.rename,
     rmImpl = fs.rm,
     logger = console,
   } = {},
@@ -84,7 +86,7 @@ export async function prepareMountedUploads(
     };
   }
 
-  const tempDir = await mkdtempImpl(path.join(tmpDir, "doccurl-upload-"));
+  const tempDir = existingTempDir || (await mkdtempImpl(path.join(tmpDir, "doccurl-upload-")));
   const cleanupTempDir = async () => {
     try {
       await rmImpl(tempDir, { recursive: true, force: true });
@@ -103,24 +105,34 @@ export async function prepareMountedUploads(
     await chmodImpl(tempDir, 0o755);
 
     for (const part of mountableParts) {
-      let fileBytes;
       let sourceFilename;
 
       if (part.source === "generated") {
-        fileBytes = getGeneratedFileBytes(part.extension);
         sourceFilename = part.filename;
       } else {
         const uploadedFile = uploadFilesByIndex.get(part.uploadIndex);
         if (!uploadedFile) {
           throw new Error(`Missing uploaded file for multipart field: ${part.name}`);
         }
-        fileBytes = uploadedFile.buffer;
+        if (!uploadedFile.tempFilePath) {
+          throw new Error(`Missing uploaded temp file for multipart field: ${part.name}`);
+        }
         sourceFilename = uploadedFile.originalname || part.filename || `upload-${part.uploadIndex}`;
       }
 
       const mountedFilename = createUniqueMountedFilename(sourceFilename, usedNames);
       const tempFilePath = path.join(tempDir, mountedFilename);
-      await writeFileImpl(tempFilePath, fileBytes);
+
+      if (part.source === "generated") {
+        await writeFileImpl(tempFilePath, getGeneratedFileBytes(part.extension));
+      } else {
+        const uploadedFile = uploadFilesByIndex.get(part.uploadIndex);
+        if (uploadedFile.tempFilePath !== tempFilePath) {
+          await renameImpl(uploadedFile.tempFilePath, tempFilePath);
+          uploadedFile.tempFilePath = tempFilePath;
+        }
+      }
+
       await chmodImpl(tempFilePath, 0o644);
       mountedFilePaths.set(part, `${GENERATED_UPLOAD_MOUNT_ROOT}/${mountedFilename}`);
     }
