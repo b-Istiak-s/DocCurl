@@ -955,25 +955,11 @@ export function createPlaygroundSystem({
   }
 
   function syncSelectedUploads(state, multipartMetadata) {
-    const nextSelectedFiles = new Map();
-    const previousParts = state.multipartMetadata?.uploadParts || [];
-
-    multipartMetadata.uploadParts.forEach((part) => {
-      const previousPart = previousParts.find(
-        (candidate) =>
-          candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
-      );
-      if (!previousPart) {
-        return;
-      }
-
-      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
-      if (selectedFile) {
-        nextSelectedFiles.set(part.uploadIndex, selectedFile);
-      }
-    });
-
-    state.selectedUploadFiles = nextSelectedFiles;
+    state.selectedUploadFiles = mapSelectedUploadsToParts(
+      state.multipartMetadata?.uploadParts || [],
+      state.selectedUploadFiles,
+      multipartMetadata.uploadParts,
+    );
   }
 
   function renderUploadRows(state) {
