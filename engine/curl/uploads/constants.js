@@ -11,4 +11,5 @@ export const GENERATED_FILE_EXTENSIONS = new Set([
 ]);
 
 export const GENERATED_UPLOAD_TOKEN_PATTERN = /^([^=]+)=@R&\{([^{}]+)\}$/;
+export const GENERIC_UPLOAD_TOKEN_PATTERN = /^([^=]+)=@(.+)$/;
 export const GENERATED_UPLOAD_MOUNT_ROOT = "/tmp/doccurl-uploads";

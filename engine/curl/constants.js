@@ -64,6 +64,8 @@ export const LIMITS = {
   maxHeaderValueLength: 2_048,
   maxBodyBytes: 64 * 1024,
   maxFormParts: 12,
+  maxUploadFileBytes: 10 * 1024 * 1024,
+  maxUploadTotalBytes: 25 * 1024 * 1024,
   maxOutputBytes: 1024 * 1024,
   requestTimeoutMs: 5_000,
 };

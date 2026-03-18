@@ -303,21 +303,38 @@ function createElement(tagName, className = "", textContent = "") {
 function buildPlaygroundMarkup(container) {
   const requestPane = createElement("section", "playgroundPane");
   const requestHeader = createElement("div", "panelHeader", "Request");
+  const requestPaneBody = createElement("div", "requestPaneBody");
+  const requestEditorView = createElement("div", "requestEditorView");
   const requestWrapper = createElement("div", "curlScriptWrapper");
   const editorShell = createElement("div", "curlEditorShell");
   const overlay = createElement("pre", "curlOverlay");
   const overlayCode = createElement("code", "language-bash");
   const editor = createElement("textarea", "curlEditor");
+  const uploadPanel = createElement("div", "curlUploadPanel");
+  uploadPanel.hidden = true;
+  const uploadError = createElement("div", "curlUploadError");
+  uploadError.hidden = true;
+  const uploadList = createElement("div", "curlUploadList");
+  const uploadActions = createElement("div", "curlUploadActions");
+  const hideUploadsButton = createElement("button", "hideUploadsBtn", "Hide Uploads");
+  const uploadRunButton = createElement("button", "uploadRunBtn", "Run");
   const requestActions = createElement("div", "panelActions");
   const copyButton = createElement("button", "copyBtn", "Copy");
+  const uploadToggleButton = createElement("button", "uploadToggleBtn", "Upload Files");
+  uploadToggleButton.hidden = true;
   const runButton = createElement("button", "runBtn", "Run");
 
   overlay.appendChild(overlayCode);
   editorShell.append(overlay, editor);
   requestWrapper.appendChild(editorShell);
+  uploadActions.append(hideUploadsButton, uploadRunButton);
+  uploadPanel.append(uploadError, uploadList, uploadActions);
   requestActions.appendChild(copyButton);
+  requestActions.appendChild(uploadToggleButton);
   requestActions.appendChild(runButton);
-  requestPane.append(requestHeader, requestWrapper, requestActions);
+  requestEditorView.append(requestWrapper, requestActions);
+  requestPaneBody.append(requestEditorView, uploadPanel);
+  requestPane.append(requestHeader, requestPaneBody);
 
   const responsePane = createElement("section", "playgroundPane responsePane");
   const responseHeader = createElement("div", "panelHeader responseHeader");
@@ -374,6 +391,24 @@ function createWindow() {
     },
     clearTimeout() {},
   };
+}
+
+class MockFormData {
+  constructor() {
+    this.entries = [];
+  }
+
+  append(name, value, filename) {
+    this.entries.push({ name, value, filename });
+  }
+}
+
+function createFileLike(name, size) {
+  return { name, size };
+}
+
+function flushAsyncWork() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function createNullProtoObject(value) {
@@ -510,6 +545,267 @@ test("copy button uses current env values and current editor text", async () => 
     assert.deepEqual(copyCalls[0].env, {
       BASE_URL: "https://api.example.com",
     });
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("upload overlay opens and closes for upload-backed multipart rows without rendering a title", () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock(
+        'curl -F "company_id=1" -F "documents[]=@/tmp/license.pdf" -F "avatar=@R&{avatar.png}" https://api.example.com/upload',
+      ),
+    );
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const uploadToggleButton = docContent.querySelector(".uploadToggleBtn");
+    const uploadPanel = docContent.querySelector(".curlUploadPanel");
+    const requestEditorView = docContent.querySelector(".requestEditorView");
+
+    assert.equal(uploadToggleButton.hidden, false);
+    assert.equal(uploadPanel.hidden, true);
+    assert.equal(requestEditorView.hidden, false);
+    assert.equal(docContent.querySelector(".curlUploadPanelHeader"), null);
+
+    uploadToggleButton.click();
+
+    const hideUploadsButton = docContent.querySelector(".hideUploadsBtn");
+    const rows = docContent.querySelectorAll(".curlUploadRow");
+    const fieldNames = docContent.querySelectorAll(".curlUploadFieldName");
+
+    assert.equal(uploadPanel.hidden, false);
+    assert.equal(requestEditorView.hidden, true);
+    assert.equal(rows.length, 1);
+    assert.equal(fieldNames[0].textContent, "documents[]");
+
+    hideUploadsButton.click();
+
+    assert.equal(uploadPanel.hidden, true);
+    assert.equal(requestEditorView.hidden, false);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("upload-backed multipart curl blocks run until a file is selected and then uses FormData", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock('curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload'));
+    const apiCalls = [];
+    const selectedFile = createFileLike("license.pdf", 1024);
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async (_url, options) => {
+        apiCalls.push(options);
+        return { ok: true };
+      },
+      parseJsonSafe: async () => ({
+        success: true,
+        output: '{"ok":true}',
+      }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      FormDataRef: MockFormData,
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const uploadToggleButton = docContent.querySelector(".uploadToggleBtn");
+    const runButton = docContent.querySelector(".runBtn");
+    const uploadPanel = docContent.querySelector(".curlUploadPanel");
+    const uploadError = docContent.querySelector(".curlUploadError");
+    const requestEditorView = docContent.querySelector(".requestEditorView");
+    const uploadRunButton = docContent.querySelector(".uploadRunBtn");
+
+    runButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 0);
+    assert.equal(uploadPanel.hidden, false);
+    assert.equal(requestEditorView.hidden, true);
+    assert.match(uploadError.textContent, /documents\[\]/i);
+
+    const fileInput = docContent.querySelector(".curlUploadInput");
+    fileInput.files = [selectedFile];
+    fileInput.dispatch("change");
+
+    uploadRunButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 1);
+    assert.equal(apiCalls[0].headers, undefined);
+    assert.ok(apiCalls[0].body instanceof MockFormData);
+    assert.deepEqual(apiCalls[0].body.entries, [
+      {
+        name: "command",
+        value: formatCurlCommand(
+          'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload',
+        ),
+        filename: undefined,
+      },
+      { name: "upload_0", value: selectedFile, filename: "license.pdf" },
+    ]);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("generated multipart curl still runs without browser uploads and keeps JSON payload", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock('curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload'),
+    );
+    const apiCalls = [];
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async (_url, options) => {
+        apiCalls.push(options);
+        return { ok: true };
+      },
+      parseJsonSafe: async () => ({
+        success: true,
+        output: '{"ok":true}',
+      }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const uploadToggleButton = docContent.querySelector(".uploadToggleBtn");
+    const runButton = docContent.querySelector(".runBtn");
+
+    assert.equal(uploadToggleButton.hidden, true);
+
+    runButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 1);
+    assert.deepEqual(apiCalls[0].headers, {
+      "Content-Type": "application/json",
+    });
+    assert.equal(
+      apiCalls[0].body,
+      JSON.stringify({
+        command: formatCurlCommand(
+          'curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload',
+        ),
+      }),
+    );
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("upload overlay auto-closes and disappears when curl stops having upload-backed fields", () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock('curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload'),
+    );
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const uploadToggleButton = docContent.querySelector(".uploadToggleBtn");
+    const uploadPanel = docContent.querySelector(".curlUploadPanel");
+    const requestEditorView = docContent.querySelector(".requestEditorView");
+    const editor = docContent.querySelector(".curlEditor");
+
+    uploadToggleButton.click();
+
+    assert.equal(uploadPanel.hidden, false);
+    assert.equal(requestEditorView.hidden, true);
+
+    editor.value = 'curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload';
+    editor.dispatch("input");
+
+    assert.equal(uploadPanel.hidden, true);
+    assert.equal(requestEditorView.hidden, false);
+    assert.equal(uploadToggleButton.hidden, true);
+    assert.equal(docContent.querySelector(".curlUploadPanelHeader"), null);
+    assert.equal(docContent.querySelectorAll(".curlUploadRow").length, 0);
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

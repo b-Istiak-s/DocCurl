@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   GENERATED_FILE_EXTENSIONS,
+  GENERIC_UPLOAD_TOKEN_PATTERN,
   GENERATED_UPLOAD_TOKEN_PATTERN,
 } from "./constants.js";
 
@@ -11,6 +12,7 @@ function normalizeGeneratedFilename(filename) {
 export function parseMultipartFormPart(rawValue) {
   const value = String(rawValue || "").trim();
   const match = value.match(GENERATED_UPLOAD_TOKEN_PATTERN);
+  const genericUploadMatch = value.match(GENERIC_UPLOAD_TOKEN_PATTERN);
 
   if (!value.includes("=")) {
     throw new Error("Multipart field must use the form name=value");
@@ -26,9 +28,22 @@ export function parseMultipartFormPart(rawValue) {
     }
 
     if (fieldValue.startsWith("@")) {
-      throw new Error(
-        "Multipart file uploads only support generated files in the form field=@R&{filename.ext}",
-      );
+      const uploadValue = fieldValue.slice(1).trim();
+      if (!uploadValue) {
+        throw new Error("Multipart upload reference cannot be empty");
+      }
+      if (uploadValue.includes(";")) {
+        throw new Error(
+          "Multipart upload modifiers like ;type= and ;filename= are not supported",
+        );
+      }
+
+      return {
+        name: fieldName,
+        source: "upload",
+        uploadReference: uploadValue,
+        filename: path.posix.basename(uploadValue),
+      };
     }
 
     return {

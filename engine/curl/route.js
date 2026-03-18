@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import multer from "multer";
 import {
   CURL_RESPONSE_META_END,
   CURL_RESPONSE_META_START,
@@ -11,7 +12,7 @@ import { validateRequestSpec } from "./validate.js";
 import { defaultDnsLookup, isLocalDevTarget, validateTargetUrl } from "./network.js";
 import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
-import { prepareGeneratedUploads } from "./uploads/files.js";
+import { prepareMountedUploads } from "./uploads/files.js";
 
 function parseCurlResponseMetadata(stdout) {
   const text = String(stdout ?? "");
@@ -45,6 +46,81 @@ function parseCurlResponseMetadata(stdout) {
   };
 }
 
+function createMultipartUploadMiddleware() {
+  return multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: LIMITS.maxUploadFileBytes,
+      files: LIMITS.maxFormParts,
+      fields: 1,
+      fieldSize: LIMITS.maxCommandLength,
+    },
+  }).any();
+}
+
+function runMultipartUploadMiddleware(middleware, req, res) {
+  return new Promise((resolve, reject) => {
+    middleware(req, res, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function formatMultipartError(error) {
+  if (!error) {
+    return "Invalid multipart upload payload";
+  }
+
+  if (error instanceof multer.MulterError) {
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return `Each uploaded file must be ${Math.round(LIMITS.maxUploadFileBytes / (1024 * 1024))} MB or smaller`;
+    }
+    if (error.code === "LIMIT_FILE_COUNT") {
+      return "Too many uploaded files";
+    }
+    if (error.code === "LIMIT_FIELD_COUNT") {
+      return "Unexpected multipart fields";
+    }
+    if (error.code === "LIMIT_FIELD_VALUE") {
+      return "Curl command field is too large";
+    }
+  }
+
+  return error.message || "Invalid multipart upload payload";
+}
+
+function normalizeUploadFiles(uploadedFiles) {
+  const files = Array.isArray(uploadedFiles) ? uploadedFiles : [];
+  const filesByIndex = new Map();
+
+  for (const file of files) {
+    const match = String(file?.fieldname || "").match(/^upload_(\d+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const uploadIndex = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(uploadIndex) || filesByIndex.has(uploadIndex)) {
+      continue;
+    }
+
+    filesByIndex.set(uploadIndex, file);
+  }
+
+  return filesByIndex;
+}
+
+function getTotalUploadBytes(uploadedFiles) {
+  return (Array.isArray(uploadedFiles) ? uploadedFiles : []).reduce(
+    (total, file) => total + (Number(file?.size) || 0),
+    0,
+  );
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
@@ -64,6 +140,7 @@ export function setupCurlRoutes(app, options = {}) {
   const runtimeOverride = options.containerRuntime;
 
   let runtimePromise = null;
+  const multipartUploadMiddleware = createMultipartUploadMiddleware();
 
   async function getContainerRuntime() {
     if (runtimeOverride) {
@@ -80,7 +157,18 @@ export function setupCurlRoutes(app, options = {}) {
     let requestSpec;
     let containerRuntime;
     let uploadSession;
+    let uploadFilesByIndex = new Map();
     try {
+      if (req.is("multipart/form-data")) {
+        await runMultipartUploadMiddleware(multipartUploadMiddleware, req, res);
+        if (getTotalUploadBytes(req.files) > LIMITS.maxUploadTotalBytes) {
+          return res.status(400).json({
+            error: `Uploaded files must total ${Math.round(LIMITS.maxUploadTotalBytes / (1024 * 1024))} MB or less`,
+          });
+        }
+        uploadFilesByIndex = normalizeUploadFiles(req.files);
+      }
+
       requestSpec = resolveRequestSpec(req.body);
       validateRequestSpec(requestSpec);
 
@@ -96,7 +184,7 @@ export function setupCurlRoutes(app, options = {}) {
       await ensureNoDockerMarker(containerRuntime);
 
       if (requestSpec.formParts.length > 0) {
-        uploadSession = await prepareGeneratedUploads(requestSpec.formParts, {
+        uploadSession = await prepareMountedUploads(requestSpec.formParts, uploadFilesByIndex, {
           tmpDir: options.uploadTmpDir,
           mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
           writeFileImpl: options.uploadFsWriteFile || fs.writeFile,
@@ -115,6 +203,9 @@ export function setupCurlRoutes(app, options = {}) {
     } catch (error) {
       if (uploadSession) {
         await uploadSession.cleanup();
+      }
+      if (req.is("multipart/form-data")) {
+        return res.status(400).json({ error: formatMultipartError(error) });
       }
       return res.status(400).json({ error: error.message });
     }

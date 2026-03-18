@@ -5,7 +5,7 @@ export function tokenizeCommand(command) {
     throw new Error("Curl command must be a string");
   }
 
-  const input = command.trim();
+  const input = command.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!input) {
     throw new Error("Curl command is empty");
   }

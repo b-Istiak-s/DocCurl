@@ -12,11 +12,14 @@ DocCurl accepts a safe subset of `curl`, including:
 - request data via `-d`, `--data`, `--data-raw`, `--data-binary`, and `--data-urlencode`
 - multipart text fields via `-F "field=value"`
 - generated multipart uploads via `-F "field=@R&{filename.ext}"`
+- browser-selected multipart uploads via `-F "field=@/tmp/file.pdf"` or `-F "field=@avatar.png"`
 - `HEAD` requests via `-I` or `--head`
 
 DocCurl generates a minimal backend file for `@R&{filename.ext}` uploads. Supported extensions are `png`, `jpg`, `jpeg`, `webp`, `gif`, `avif`, `mp4`, `webm`, and `pdf`.
 
-Unsupported examples include real filesystem uploads such as `@/tmp/file.pdf`, proxy flags, redirect following, and cookie-jar workflows.
+For any other `@...` multipart file value, the playground shows an `Upload Files` toggle beside `Copy`. That panel mirrors the curl multipart file rows, lets users choose browser files for those rows, and sends them only for matching multipart fields. Missing browser files for non-generated `@...` parts block the run. Uploads are limited to `10 MB` per file and `25 MB` total.
+
+Unsupported examples include multipart file modifiers such as `;type=` or `;filename=`, proxy flags, redirect following, and cookie-jar workflows.
 
 ## Placeholder Variables
 
@@ -42,6 +45,7 @@ That request asks DocCurl to run another safe `curl` command and return the nest
 
 - Edit the left pane directly; the highlighted overlay stays aligned with the textarea.
 - Use `Copy` to copy current env exports plus the exact curl block you are editing.
+- Use `Upload Files` for non-generated multipart file fields; generated `@R&{...}` fields still work without browser uploads.
 - Use `Export Curls` to export every markdown file’s curl examples as Insomnia, Postman, or Hoppscotch JSON.
 - Use fullscreen when you want more horizontal space for large JSON bodies or responses.
 - Reset document changes from the environment toolbar if you want to return to the original examples.

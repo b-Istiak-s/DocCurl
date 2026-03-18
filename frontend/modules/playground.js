@@ -4,6 +4,10 @@ const STORAGE_KEYS = {
   curlEdits: "doccurl.curlEdits.v1",
 };
 const RESERVED_STORAGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const UPLOAD_LIMITS = {
+  maxFileBytes: 10 * 1024 * 1024,
+  maxTotalBytes: 25 * 1024 * 1024,
+};
 
 function hashString(value) {
   let hash = 2166136261;
@@ -147,13 +151,14 @@ export function clearAllStoredCurlEdits(localStorageRef = globalThis.localStorag
 }
 
 export function tokenizeShell(input) {
+  const normalizedInput = String(input || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const tokens = [];
   let current = "";
   let quote = null;
   let escaping = false;
 
-  for (let i = 0; i < input.length; i += 1) {
-    const ch = input[i];
+  for (let i = 0; i < normalizedInput.length; i += 1) {
+    const ch = normalizedInput[i];
 
     if (escaping) {
       if (ch !== "\n") {
@@ -178,7 +183,7 @@ export function tokenizeShell(input) {
         continue;
       }
       if (ch === "\\") {
-        const next = input[i + 1];
+        const next = normalizedInput[i + 1];
         if (
           next === '"' ||
           next === "\\" ||
@@ -269,6 +274,142 @@ function formatDataLines(dataToken) {
     lines.push(`  ${jsonLines[i]}${isLast ? "' \\" : ""}`);
   }
   return lines;
+}
+
+function parseMultipartFieldDefinition(rawValue) {
+  const value = String(rawValue || "").trim();
+  const separatorIndex = value.indexOf("=");
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  const name = value.slice(0, separatorIndex).trim();
+  const fieldValue = value.slice(separatorIndex + 1).trim();
+  if (!name) {
+    return null;
+  }
+
+  if (/^@R&\{[^{}]+\}$/.test(fieldValue)) {
+    return {
+      name,
+      rawValue: value,
+      source: "generated",
+    };
+  }
+
+  if (fieldValue.startsWith("@")) {
+    const uploadReference = fieldValue.slice(1).trim();
+    if (!uploadReference || uploadReference.includes(";")) {
+      return {
+        name,
+        rawValue: value,
+        source: "unsupported",
+      };
+    }
+
+    return {
+      name,
+      rawValue: value,
+      source: "upload",
+    };
+  }
+
+  return {
+    name,
+    rawValue: value,
+    source: "text",
+  };
+}
+
+function parseCurlMultipartMetadata(command) {
+  let tokens = [];
+
+  try {
+    tokens = tokenizeShell(String(command || ""));
+  } catch {
+    return {
+      hasMultipart: false,
+      uploadParts: [],
+    };
+  }
+
+  if (!tokens.length || tokens[0] !== "curl") {
+    return {
+      hasMultipart: false,
+      uploadParts: [],
+    };
+  }
+
+  const uploadParts = [];
+  let hasMultipart = false;
+
+  function addMultipartToken(rawValue) {
+    hasMultipart = true;
+    const parsedPart = parseMultipartFieldDefinition(rawValue);
+    if (!parsedPart || parsedPart.source !== "upload") {
+      return;
+    }
+
+    uploadParts.push({
+      ...parsedPart,
+      uploadIndex: uploadParts.length,
+      signature: `${parsedPart.name}\n${parsedPart.rawValue}`,
+    });
+  }
+
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+
+    if (token === "-F" || token === "--form") {
+      addMultipartToken(tokens[i + 1] || "");
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("--form=")) {
+      addMultipartToken(token.slice("--form=".length));
+      continue;
+    }
+
+    if (token.startsWith("-F") && token.length > 2) {
+      addMultipartToken(token.slice(2));
+    }
+  }
+
+  return {
+    hasMultipart,
+    uploadParts,
+  };
+}
+
+function formatUploadSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1).replace(/\.0$/, "")} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} B`;
+}
+
+function createUploadFieldName(uploadIndex) {
+  return `upload_${uploadIndex}`;
+}
+
+function sumUploadSizes(files) {
+  let total = 0;
+  for (const file of files.values()) {
+    total += Number(file?.size) || 0;
+  }
+  return total;
+}
+
+function describeSelectedUpload(file) {
+  if (!file) {
+    return "No file selected";
+  }
+  return `${file.name} (${formatUploadSize(file.size)})`;
 }
 
 export function formatCurlCommand(command) {
@@ -667,6 +808,7 @@ export function createPlaygroundSystem({
       return false;
     },
   },
+  FormDataRef = globalThis.FormData,
   localStorageRef = globalThis.localStorage,
   documentRef = globalThis.document,
   windowRef = globalThis.window,
@@ -689,8 +831,13 @@ export function createPlaygroundSystem({
 
   function resetVisiblePlaygroundState(state) {
     state.editorElement.value = state.originalTemplate;
+    state.selectedUploadFiles.clear();
+    state.uploadValidationMessage = "";
+    state.isUploadPanelOpen = false;
+    state.multipartMetadata = parseCurlMultipartMetadata(state.originalTemplate);
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
+    syncUploadUI(state);
     setResponseMetadata(state, null);
     renderEmpty(state.outputElement);
   }
@@ -724,14 +871,212 @@ export function createPlaygroundSystem({
     bodyElement.classList.remove("fullscreen-open");
   }
 
-  async function runCurlCommand(command, state) {
+  function setUploadValidationMessage(state, message = "") {
+    state.uploadValidationMessage = String(message || "");
+    if (state.uploadErrorElement) {
+      state.uploadErrorElement.textContent = state.uploadValidationMessage;
+      state.uploadErrorElement.hidden = !state.uploadValidationMessage;
+    }
+  }
+
+  function setUploadPanelOpen(state, isOpen, { clearValidation = false } = {}) {
+    state.isUploadPanelOpen = Boolean(isOpen);
+    if (clearValidation) {
+      setUploadValidationMessage(state, "");
+    }
+  }
+
+  function syncSelectedUploads(state, multipartMetadata) {
+    const nextSelectedFiles = new Map();
+    const previousParts = state.multipartMetadata?.uploadParts || [];
+
+    multipartMetadata.uploadParts.forEach((part) => {
+      const previousPart = previousParts.find(
+        (candidate) =>
+          candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
+      );
+      if (!previousPart) {
+        return;
+      }
+
+      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
+      if (selectedFile) {
+        nextSelectedFiles.set(part.uploadIndex, selectedFile);
+      }
+    });
+
+    state.selectedUploadFiles = nextSelectedFiles;
+  }
+
+  function renderUploadRows(state) {
+    state.uploadListElement.replaceChildren();
+
+    state.multipartMetadata.uploadParts.forEach((part) => {
+      const row = state.documentRef.createElement("div");
+      row.className = "curlUploadRow";
+
+      const nameCell = state.documentRef.createElement("div");
+      nameCell.className = "curlUploadNameCell";
+      const nameText = state.documentRef.createElement("span");
+      nameText.className = "curlUploadFieldName";
+      nameText.textContent = part.name;
+
+      const fileCell = state.documentRef.createElement("div");
+      fileCell.className = "curlUploadFileCell";
+      const fileInput = state.documentRef.createElement("input");
+      fileInput.className = "curlUploadInput";
+      fileInput.type = "file";
+
+      const fileMeta = state.documentRef.createElement("div");
+      fileMeta.className = "curlUploadMeta";
+      fileMeta.textContent = describeSelectedUpload(
+        state.selectedUploadFiles.get(part.uploadIndex),
+      );
+
+      fileInput.addEventListener("change", (event) => {
+        const selectedFile = event.target?.files?.[0] || null;
+        if (!selectedFile) {
+          state.selectedUploadFiles.delete(part.uploadIndex);
+          setUploadValidationMessage(state, "");
+          syncUploadUI(state);
+          return;
+        }
+
+        if (selectedFile.size > UPLOAD_LIMITS.maxFileBytes) {
+          setUploadValidationMessage(
+            state,
+            `Each file must be ${formatUploadSize(UPLOAD_LIMITS.maxFileBytes)} or smaller.`,
+          );
+          syncUploadUI(state);
+          return;
+        }
+
+        const nextFiles = new Map(state.selectedUploadFiles);
+        nextFiles.set(part.uploadIndex, selectedFile);
+        if (sumUploadSizes(nextFiles) > UPLOAD_LIMITS.maxTotalBytes) {
+          setUploadValidationMessage(
+            state,
+            `Selected files must total ${formatUploadSize(UPLOAD_LIMITS.maxTotalBytes)} or less.`,
+          );
+          syncUploadUI(state);
+          return;
+        }
+
+        state.selectedUploadFiles = nextFiles;
+        setUploadValidationMessage(state, "");
+        syncUploadUI(state);
+      });
+
+      nameCell.appendChild(nameText);
+      fileCell.append(fileInput, fileMeta);
+      row.append(nameCell, fileCell);
+      state.uploadListElement.appendChild(row);
+    });
+  }
+
+  function syncUploadUI(state) {
+    const hasUploadParts = state.multipartMetadata.uploadParts.length > 0;
+    state.uploadToggleButton.hidden = !hasUploadParts;
+
+    if (!hasUploadParts) {
+      state.selectedUploadFiles.clear();
+      state.isUploadPanelOpen = false;
+      state.requestEditorView.hidden = false;
+      state.editorElement.disabled = false;
+      state.uploadPanel.hidden = true;
+      state.uploadListElement.replaceChildren();
+      setUploadValidationMessage(state, "");
+      return;
+    }
+
+    state.requestEditorView.hidden = state.isUploadPanelOpen;
+    state.editorElement.disabled = state.isUploadPanelOpen;
+    state.uploadPanel.hidden = !state.isUploadPanelOpen;
+
+    if (!state.isUploadPanelOpen) {
+      return;
+    }
+
+    state.editorElement.blur?.();
+    renderUploadRows(state);
+    setUploadValidationMessage(state, state.uploadValidationMessage);
+  }
+
+  function syncMultipartState(state) {
+    const multipartMetadata = parseCurlMultipartMetadata(state.editorElement.value || "");
+    syncSelectedUploads(state, multipartMetadata);
+    state.multipartMetadata = multipartMetadata;
+    if (multipartMetadata.uploadParts.length === 0) {
+      state.selectedUploadFiles.clear();
+      setUploadPanelOpen(state, false, { clearValidation: true });
+    }
+    syncUploadUI(state);
+  }
+
+  function buildRunRequest(command, state) {
+    const relevantFiles = new Map();
+
+    for (const part of state.multipartMetadata.uploadParts) {
+      const selectedFile = state.selectedUploadFiles.get(part.uploadIndex);
+      if (!selectedFile) {
+        setUploadPanelOpen(state, true);
+        setUploadValidationMessage(
+          state,
+          `Select a file for multipart field "${part.name}" before running this curl.`,
+        );
+        syncUploadUI(state);
+        return null;
+      }
+      if (selectedFile.size > UPLOAD_LIMITS.maxFileBytes) {
+        setUploadPanelOpen(state, true);
+        setUploadValidationMessage(
+          state,
+          `Each file must be ${formatUploadSize(UPLOAD_LIMITS.maxFileBytes)} or smaller.`,
+        );
+        syncUploadUI(state);
+        return null;
+      }
+      relevantFiles.set(part.uploadIndex, selectedFile);
+    }
+
+    if (sumUploadSizes(relevantFiles) > UPLOAD_LIMITS.maxTotalBytes) {
+      setUploadPanelOpen(state, true);
+      setUploadValidationMessage(
+        state,
+        `Selected files must total ${formatUploadSize(UPLOAD_LIMITS.maxTotalBytes)} or less.`,
+      );
+      syncUploadUI(state);
+      return null;
+    }
+
+    setUploadValidationMessage(state, "");
+
+    if (relevantFiles.size === 0) {
+      return {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      };
+    }
+
+    const formData = new FormDataRef();
+    formData.append("command", command);
+    for (const part of state.multipartMetadata.uploadParts) {
+      const file = relevantFiles.get(part.uploadIndex);
+      formData.append(createUploadFieldName(part.uploadIndex), file, file.name);
+    }
+
+    return {
+      body: formData,
+    };
+  }
+
+  async function runCurlCommand(requestOptions, state) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
     try {
       const response = await apiFetch(withBasePath("/api/run-curl"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command }),
+        ...requestOptions,
       });
 
       const data = await parseJsonSafe(response);
@@ -757,6 +1102,17 @@ export function createPlaygroundSystem({
     }
   }
 
+  async function handleRunRequest(state) {
+    const env = envManager.getCurrentEnv();
+    const visibleCommand = state.editorElement.value || "";
+    const resolvedCommand = replacePlaceholders(visibleCommand, env);
+    const requestOptions = buildRunRequest(resolvedCommand, state);
+    if (!requestOptions) {
+      return;
+    }
+    await runCurlCommand(requestOptions, state);
+  }
+
   function createPlayground(curlCommand, { docPath, blockIndex }) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
@@ -770,15 +1126,28 @@ export function createPlaygroundSystem({
     playground.innerHTML = `
       <section class="playgroundPane">
         <div class="panelHeader">Request</div>
-        <div class="curlScriptWrapper">
-          <div class="curlEditorShell">
-            <pre class="curlOverlay"><code class="language-bash"></code></pre>
-            <textarea class="curlEditor" spellcheck="false" aria-label="Curl request editor"></textarea>
+        <div class="requestPaneBody">
+          <div class="requestEditorView">
+            <div class="curlScriptWrapper">
+              <div class="curlEditorShell">
+                <pre class="curlOverlay"><code class="language-bash"></code></pre>
+                <textarea class="curlEditor" spellcheck="false" aria-label="Curl request editor"></textarea>
+              </div>
+            </div>
+            <div class="panelActions">
+              <button type="button" class="copyBtn">Copy</button>
+              <button type="button" class="uploadToggleBtn" hidden>Upload Files</button>
+              <button type="button" class="runBtn">Run</button>
+            </div>
           </div>
-        </div>
-        <div class="panelActions">
-          <button type="button" class="copyBtn">Copy</button>
-          <button type="button" class="runBtn">Run</button>
+          <div class="curlUploadPanel" hidden>
+            <div class="curlUploadError" hidden></div>
+            <div class="curlUploadList"></div>
+            <div class="curlUploadActions">
+              <button type="button" class="hideUploadsBtn">Hide Uploads</button>
+              <button type="button" class="uploadRunBtn">Run</button>
+            </div>
+          </div>
         </div>
       </section>
       <section class="playgroundPane responsePane">
@@ -797,6 +1166,7 @@ export function createPlaygroundSystem({
     `;
 
     const editorElement = playground.querySelector(".curlEditor");
+    const requestEditorView = playground.querySelector(".requestEditorView");
     const editorShell = playground.querySelector(".curlEditorShell");
     const overlayElement = playground.querySelector(".curlOverlay");
     const overlayCode = overlayElement.querySelector("code");
@@ -804,6 +1174,12 @@ export function createPlaygroundSystem({
     const responseMetaButton = playground.querySelector(".responseMetaBtn");
     const responseMetaToast = playground.querySelector(".responseMetaToast");
     const copyButton = playground.querySelector(".copyBtn");
+    const uploadToggleButton = playground.querySelector(".uploadToggleBtn");
+    const uploadPanel = playground.querySelector(".curlUploadPanel");
+    const uploadListElement = playground.querySelector(".curlUploadList");
+    const uploadErrorElement = playground.querySelector(".curlUploadError");
+    const uploadHideButton = playground.querySelector(".hideUploadsBtn");
+    const uploadRunButton = playground.querySelector(".uploadRunBtn");
     const runButton = playground.querySelector(".runBtn");
     const fullscreenButton = playground.querySelector(".fullscreenBtn");
     const storedValue = getStoredCurlEdit(docPath, blockId, localStorageRef);
@@ -814,6 +1190,7 @@ export function createPlaygroundSystem({
       docPath,
       blockId,
       editorElement,
+      requestEditorView,
       editorShell,
       overlayElement,
       overlayCode,
@@ -821,9 +1198,19 @@ export function createPlaygroundSystem({
       responseMetaButton,
       responseMetaToast,
       copyButton,
+      uploadToggleButton,
+      uploadPanel,
+      uploadListElement,
+      uploadErrorElement,
+      uploadHideButton,
+      uploadRunButton,
       runButton,
       fullscreenButton,
       originalTemplate,
+      multipartMetadata: parseCurlMultipartMetadata(editorElement.value || ""),
+      selectedUploadFiles: new Map(),
+      isUploadPanelOpen: false,
+      uploadValidationMessage: "",
       responseMetadata: null,
       responseMetaTimeoutId: null,
       documentRef,
@@ -833,11 +1220,13 @@ export function createPlaygroundSystem({
 
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
+    syncUploadUI(state);
     setResponseMetadata(state, null);
 
     editorElement.addEventListener("input", () => {
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
+      syncMultipartState(state);
       persistEditorValue(state);
     });
 
@@ -849,14 +1238,26 @@ export function createPlaygroundSystem({
       prettifyTextareaCommand(state);
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
+      syncMultipartState(state);
       persistEditorValue(state);
     });
 
+    uploadToggleButton.addEventListener("click", () => {
+      setUploadPanelOpen(state, true);
+      syncUploadUI(state);
+    });
+
+    uploadHideButton.addEventListener("click", () => {
+      setUploadPanelOpen(state, false, { clearValidation: true });
+      syncUploadUI(state);
+    });
+
     runButton.addEventListener("click", async () => {
-      const env = envManager.getCurrentEnv();
-      const visibleCommand = editorElement.value || "";
-      const resolvedCommand = replacePlaceholders(visibleCommand, env);
-      await runCurlCommand(resolvedCommand, state);
+      await handleRunRequest(state);
+    });
+
+    uploadRunButton.addEventListener("click", async () => {
+      await handleRunRequest(state);
     });
 
     copyButton.addEventListener("click", async () => {
