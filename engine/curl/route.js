@@ -86,6 +86,7 @@ export function setupCurlRoutes(app, options = {}) {
   const execFileImpl = options.execFileImpl || execFile;
   const dnsLookup = options.dnsLookup || defaultDnsLookup;
   const containerImage = options.dockerImage || "curlimages/curl";
+  const logger = options.logger || console;
   const runtimeResolver =
     options.runtimeResolver ||
     (() => defaultRuntimeResolver(options.runtimeExecFile || execFile));
@@ -95,7 +96,7 @@ export function setupCurlRoutes(app, options = {}) {
       markerPath: options.noDockerMarkerPath || NODOCKER_MARKER_PATH,
       fsAccess: options.fsAccess || fs.access,
       fsWriteFile: options.fsWriteFile || fs.writeFile,
-      logger: options.logger || console,
+      logger,
     });
   const runtimeOverride = options.containerRuntime;
   const uploadLimits = {
@@ -137,7 +138,7 @@ export function setupCurlRoutes(app, options = {}) {
           rmImpl: options.uploadFsRm || fs.rm,
           createWriteStreamImpl:
             options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
-          logger: options.logger || console,
+          logger,
         });
         requestBody = multipartSession.body;
         uploadFilesByIndex = multipartSession.uploadFilesByIndex;
@@ -175,7 +176,7 @@ export function setupCurlRoutes(app, options = {}) {
             chmodImpl: options.uploadFsChmod || fs.chmod,
             renameImpl: options.uploadFsRename || fs.rename,
             rmImpl: options.uploadFsRm || fs.rm,
-            logger: options.logger || console,
+            logger,
           },
         );
         requestSpec = {
@@ -243,9 +244,13 @@ export function setupCurlRoutes(app, options = {}) {
         (error, stdout, stderr) => {
           finishWithCleanup(() => {
             if (error) {
+              logger.error?.("Curl execution failed", {
+                requestUrl: requestSpec.url,
+                stderr: String(stderr || ""),
+                error,
+              });
               return res.status(500).json({
                 error: "Execution failed",
-                details: stderr || error.message,
               });
             }
 
@@ -259,10 +264,13 @@ export function setupCurlRoutes(app, options = {}) {
         },
       );
     } catch (error) {
+      logger.error?.("Curl execution failed", {
+        requestUrl: requestSpec?.url || null,
+        error,
+      });
       await finishWithCleanup(() =>
         res.status(500).json({
           error: "Execution failed",
-          details: error.message,
         }),
       );
     }
