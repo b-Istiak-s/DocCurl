@@ -165,6 +165,9 @@ test("protected APIs are blocked until login succeeds", async () => {
         assert.equal(loginResponse.status, 200);
         const cookieHeader = loginResponse.headers.get("set-cookie");
         assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.match(cookieHeader, /;\s*Secure/i);
         const sessionCookie = cookieHeader.split(";")[0];
         assert.ok(sessionCookie.startsWith("doccurl_session="));
 
@@ -413,6 +416,34 @@ test("development mode stays open when password is not provided", async () => {
 
         const treeResponse = await fetch(`${baseUrl}/api/docs/tree`);
         assert.equal(treeResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("development mode password auth sets a non-secure session cookie", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true, password: "secret123" },
+      async ({ baseUrl }) => {
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+
+        assert.equal(loginResponse.status, 200);
+        const cookieHeader = loginResponse.headers.get("set-cookie");
+        assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.doesNotMatch(cookieHeader, /;\s*Secure/i);
       },
     );
     if (!started) {

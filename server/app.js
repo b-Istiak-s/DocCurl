@@ -25,6 +25,7 @@ export function createApp({
   const app = express();
   const markdownRenderer = new MarkdownIt();
   const sessionSecret = crypto.randomBytes(32);
+  const secureSessionCookie = !isDev;
 
   function isAuthenticated(req) {
     if (!authEnabled) {
@@ -44,6 +45,7 @@ export function createApp({
     isAuthenticated,
     configuredPassword,
     sessionSecret,
+    secureSessionCookie,
     features,
   });
 
