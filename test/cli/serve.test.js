@@ -4,7 +4,7 @@ import { Command } from "commander";
 
 import { registerServeCommand } from "../../cli/commands/serve.js";
 
-test("serve command forwards the collapse flag to startServer", async () => {
+test("serve command forwards host and collapse options to startServer", async () => {
   let receivedCall = null;
   const program = new Command();
 
@@ -23,6 +23,8 @@ test("serve command forwards the collapse flag to startServer", async () => {
     "4123",
     "--dir",
     "docs",
+    "--host",
+    "0.0.0.0",
     "--dev",
     "--collapse",
   ]);
@@ -33,6 +35,7 @@ test("serve command forwards the collapse flag to startServer", async () => {
   assert.deepEqual(receivedCall.options, {
     dev: true,
     collapse: true,
+    host: "0.0.0.0",
     password: "",
   });
 });

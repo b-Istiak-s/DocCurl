@@ -70,6 +70,7 @@ Options:
 
 - `-p, --port <port>`: Server port. Default `3000`.
 - `-d, --dir <dir>`: Docs directory. Default `docs`.
+- `--host <host>`: Host interface to bind. Default `127.0.0.1`.
 - `--dev`: Development mode (allows localhost/private targets).
 - `--collapse`: Enables the `Focus Curls` toggle in the docs UI.
 - `--password <password>`: Enables auth. Required in non-dev mode.
@@ -79,6 +80,7 @@ Examples:
 ```bash
 doccurl serve --dev
 doccurl serve -p 8080 -d ./documentation
+doccurl serve --host 0.0.0.0 -p 8080
 doccurl serve --password mySecret123
 ```
 
