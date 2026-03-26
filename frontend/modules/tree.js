@@ -2,6 +2,285 @@ function isHeadingElement(element) {
   return /^H[1-6]$/.test(element?.tagName || "");
 }
 
+const BLOCKED_HTML_TAGS = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "link",
+  "meta",
+  "base",
+  "form",
+  "input",
+  "button",
+  "select",
+  "option",
+  "textarea",
+]);
+
+const ALLOWED_HTML_TAGS = new Set([
+  "a",
+  "blockquote",
+  "br",
+  "code",
+  "del",
+  "div",
+  "em",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "img",
+  "kbd",
+  "li",
+  "ol",
+  "p",
+  "pre",
+  "s",
+  "span",
+  "strong",
+  "sub",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+]);
+
+const ALLOWED_HTML_ATTRIBUTES = {
+  a: new Set(["href", "title"]),
+  code: new Set(["class"]),
+  img: new Set(["src", "alt", "title"]),
+  li: new Set(["value"]),
+  ol: new Set(["start"]),
+  pre: new Set(["class"]),
+  span: new Set(["class"]),
+  td: new Set(["align", "colspan", "rowspan"]),
+  th: new Set(["align", "colspan", "rowspan"]),
+};
+
+function escapeHtmlAttribute(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function clearElementChildren(element) {
+  if (typeof element?.replaceChildren === "function") {
+    element.replaceChildren();
+    return;
+  }
+
+  element.innerHTML = "";
+}
+
+function renderTextBlock(
+  container,
+  tagName,
+  className,
+  text,
+  documentRef = globalThis.document,
+) {
+  clearElementChildren(container);
+  const element = documentRef?.createElement
+    ? documentRef.createElement(tagName)
+    : null;
+
+  if (element) {
+    if (className) {
+      element.className = className;
+    }
+    element.textContent = text;
+    container.appendChild(element);
+    return;
+  }
+
+  container.textContent = text;
+}
+
+function isSafeDocumentUrl(value, { allowDataImage = false } = {}) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const schemeMatch = normalized.match(/^([a-z0-9+.-]+):/i);
+  if (!schemeMatch) {
+    return true;
+  }
+
+  const protocol = schemeMatch[1].toLowerCase();
+  if (protocol === "http" || protocol === "https" || protocol === "mailto" || protocol === "tel") {
+    return true;
+  }
+
+  if (
+    allowDataImage &&
+    protocol === "data" &&
+    /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function sanitizeHtmlAttributes(tagName, rawAttributes) {
+  const allowedAttributes = ALLOWED_HTML_ATTRIBUTES[tagName] || new Set();
+  const sanitizedAttributes = [];
+  const attributePattern =
+    /([A-Za-z0-9:-]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match;
+
+  while ((match = attributePattern.exec(rawAttributes))) {
+    const attributeName = String(match[1] || "").toLowerCase();
+    const attributeValue = match[3] ?? match[4] ?? match[5] ?? "";
+
+    if (
+      !allowedAttributes.has(attributeName) ||
+      attributeName.startsWith("on") ||
+      attributeName === "style"
+    ) {
+      continue;
+    }
+
+    if (
+      (attributeName === "href" && !isSafeDocumentUrl(attributeValue)) ||
+      (attributeName === "src" &&
+        !isSafeDocumentUrl(attributeValue, { allowDataImage: tagName === "img" }))
+    ) {
+      continue;
+    }
+
+    sanitizedAttributes.push(
+      ` ${attributeName}="${escapeHtmlAttribute(attributeValue)}"`,
+    );
+  }
+
+  return sanitizedAttributes.join("");
+}
+
+export function sanitizeDocumentHtml(html) {
+  const input = String(html || "");
+  const withoutBlockedElements = input
+    .replace(
+      /<(script|style|iframe|object|embed|form|textarea|select|option|button)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+      "",
+    )
+    .replace(
+      /<(link|meta|base|input)\b[^>]*\/?>/gi,
+      "",
+    );
+
+  return withoutBlockedElements.replace(
+    /<\/?([A-Za-z0-9:-]+)([^>]*)>/g,
+    (fullMatch, rawTagName, rawAttributes = "") => {
+      const tagName = String(rawTagName || "").toLowerCase();
+      const isClosingTag = fullMatch.startsWith("</");
+
+      if (BLOCKED_HTML_TAGS.has(tagName) || !ALLOWED_HTML_TAGS.has(tagName)) {
+        return "";
+      }
+
+      if (isClosingTag) {
+        return `</${tagName}>`;
+      }
+
+      const selfClosing = /\/>$/.test(fullMatch) || tagName === "br" || tagName === "hr";
+      const sanitizedAttributes = sanitizeHtmlAttributes(tagName, rawAttributes);
+      return `<${tagName}${sanitizedAttributes}${selfClosing ? " />" : ">"}`;
+    },
+  );
+}
+
+function appendSanitizedNode(parent, sourceNode, documentRef) {
+  if (!sourceNode) {
+    return;
+  }
+
+  if (sourceNode.nodeType === 3) {
+    parent.appendChild(documentRef.createTextNode(sourceNode.textContent || ""));
+    return;
+  }
+
+  if (sourceNode.nodeType !== 1) {
+    return;
+  }
+
+  const tagName = sourceNode.tagName.toLowerCase();
+  if (BLOCKED_HTML_TAGS.has(tagName)) {
+    return;
+  }
+
+  if (!ALLOWED_HTML_TAGS.has(tagName)) {
+    Array.from(sourceNode.childNodes || []).forEach((childNode) => {
+      appendSanitizedNode(parent, childNode, documentRef);
+    });
+    return;
+  }
+
+  const safeElement = documentRef.createElement(tagName);
+  const allowedAttributes = ALLOWED_HTML_ATTRIBUTES[tagName] || new Set();
+
+  Array.from(sourceNode.attributes || []).forEach((attribute) => {
+    const attributeName = String(attribute.name || "").toLowerCase();
+    const attributeValue = String(attribute.value || "");
+
+    if (
+      !allowedAttributes.has(attributeName) ||
+      attributeName.startsWith("on") ||
+      attributeName === "style"
+    ) {
+      return;
+    }
+
+    if (
+      (attributeName === "href" && !isSafeDocumentUrl(attributeValue)) ||
+      (attributeName === "src" &&
+        !isSafeDocumentUrl(attributeValue, { allowDataImage: tagName === "img" }))
+    ) {
+      return;
+    }
+
+    safeElement.setAttribute(attributeName, attributeValue);
+  });
+
+  Array.from(sourceNode.childNodes || []).forEach((childNode) => {
+    appendSanitizedNode(safeElement, childNode, documentRef);
+  });
+
+  parent.appendChild(safeElement);
+}
+
+function renderSanitizedDocument(container, html, documentRef, windowRef) {
+  const DOMParserImpl = windowRef?.DOMParser || globalThis.DOMParser;
+
+  if (
+    DOMParserImpl &&
+    typeof documentRef?.createElement === "function" &&
+    typeof documentRef?.createTextNode === "function"
+  ) {
+    clearElementChildren(container);
+    const parser = new DOMParserImpl();
+    const parsed = parser.parseFromString(String(html || ""), "text/html");
+    Array.from(parsed.body.childNodes || []).forEach((childNode) => {
+      appendSanitizedNode(container, childNode, documentRef);
+    });
+    return;
+  }
+
+  container.innerHTML = sanitizeDocumentHtml(html);
+}
+
 function isAlwaysVisibleElement(element) {
   return (
     element?.classList?.contains("docActionBar") ||
@@ -106,6 +385,14 @@ export function createDocsTreeSystem({
   const FILE_ICON_SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>';
   let isContentCollapsed = false;
+
+  function renderDocError(message) {
+    renderTextBlock(docContent, "p", "errorText", message, documentRef);
+  }
+
+  function renderTreeError(message) {
+    renderTextBlock(docList, "li", "errorText", message, documentRef);
+  }
 
   function createDocActionBar() {
     const features = getFeatures() || {};
@@ -322,12 +609,12 @@ export function createDocsTreeSystem({
 
       if (!response.ok) {
         const data = await parseJsonSafe(response);
-        docContent.innerHTML = `<p class="errorText">Error: ${data.error || "Unable to load document"}</p>`;
+        renderDocError(`Error: ${data.error || "Unable to load document"}`);
         return;
       }
 
       const data = await parseJsonSafe(response);
-      docContent.innerHTML = data.html || "";
+      renderSanitizedDocument(docContent, data.html || "", documentRef, windowRef);
 
       const placeholderNames =
         envManager.collectPlaceholderNamesFromDocument(docContent);
@@ -346,13 +633,11 @@ export function createDocsTreeSystem({
       }
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
-        docContent.innerHTML =
-          '<p class="errorText">Authentication required.</p>';
+        renderDocError("Authentication required.");
         return;
       }
 
-      docContent.innerHTML =
-        '<p class="errorText">Error loading document. Please try again.</p>';
+      renderDocError("Error loading document. Please try again.");
       console.error("Error loading document:", error);
     }
   }
@@ -363,7 +648,7 @@ export function createDocsTreeSystem({
 
       if (!response.ok) {
         const data = await parseJsonSafe(response);
-        docList.innerHTML = `<li class="errorText">${data.error || "Error loading docs tree"}</li>`;
+        renderTreeError(data.error || "Error loading docs tree");
         return;
       }
 
@@ -373,8 +658,7 @@ export function createDocsTreeSystem({
       renderDocTree();
 
       if (docsTree.length === 0) {
-        docContent.innerHTML =
-          '<p class="errorText">No markdown docs found.</p>';
+        renderDocError("No markdown docs found.");
         return;
       }
 
@@ -391,15 +675,14 @@ export function createDocsTreeSystem({
         renderDocTree();
         await loadDoc(firstFilePath);
       } else {
-        docContent.innerHTML =
-          '<p class="errorText">No markdown docs found.</p>';
+        renderDocError("No markdown docs found.");
       }
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
         return;
       }
 
-      docList.innerHTML = '<li class="errorText">Error loading docs tree</li>';
+      renderTreeError("Error loading docs tree");
       console.error("Error loading docs tree:", error);
     }
   }

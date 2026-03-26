@@ -5,6 +5,7 @@ import {
   applyCollapsedDocumentView,
   collectCollapsedVisibleElements,
   createDocsTreeSystem,
+  sanitizeDocumentHtml,
 } from "../../frontend/modules/tree.js";
 
 class MockClassList {
@@ -234,6 +235,29 @@ function createResponse(ok, data) {
   return { ok, data };
 }
 
+test("sanitizeDocumentHtml strips executable markup while preserving safe markdown HTML", () => {
+  const sanitized = sanitizeDocumentHtml(`
+    <h2>Docs</h2>
+    <p onclick="alert(1)">Hello</p>
+    <a href="javascript:alert(1)">Bad link</a>
+    <a href="https://example.com/docs">Good link</a>
+    <img src="x" onerror="alert(1)" alt="Preview">
+    <script>alert(1)</script>
+    <pre><code class="language-curl">curl https://api.example.com</code></pre>
+  `);
+
+  assert.match(sanitized, /<h2>Docs<\/h2>/);
+  assert.match(sanitized, /<p>Hello<\/p>/);
+  assert.match(sanitized, /<a>Bad link<\/a>/);
+  assert.match(sanitized, /<a href="https:\/\/example\.com\/docs">Good link<\/a>/);
+  assert.match(sanitized, /<img src="x" alt="Preview">|<img src="x" alt="Preview" \/>/);
+  assert.match(sanitized, /language-curl/);
+  assert.doesNotMatch(sanitized, /onclick=/i);
+  assert.doesNotMatch(sanitized, /onerror=/i);
+  assert.doesNotMatch(sanitized, /javascript:/i);
+  assert.doesNotMatch(sanitized, /<script/i);
+});
+
 test("docs tree renders directory labels safely and keeps toggle behavior", async () => {
   const previousDocument = global.document;
   const previousWindow = global.window;
@@ -346,6 +370,112 @@ test("docs tree renders directory labels safely and keeps toggle behavior", asyn
     assert.equal(rerenderedToggle.querySelector(".folderIcon")?.getAttribute("aria-hidden"), "true");
     rerenderedToggle.click();
     assert.ok(docList.querySelector(".docTreeChildren"));
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("docs tree renders API error text without interpreting HTML", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = createDocument();
+  global.window = {
+    matchMedia: () => ({ matches: false }),
+  };
+
+  const docList = new MockElement("div");
+  const docContent = new MockElement("div");
+  const maliciousError = '<img src=x onerror="alert(1)">';
+
+  const treeSystem = createDocsTreeSystem({
+    docList,
+    docContent,
+    apiFetch: async (url) => {
+      if (String(url).includes("/api/docs/tree")) {
+        return createResponse(false, { error: maliciousError });
+      }
+      return createResponse(false, { error: maliciousError });
+    },
+    parseJsonSafe: async (response) => response.data,
+    withBasePath: (value) => value,
+    envManager: {
+      collectPlaceholderNamesFromDocument: () => [],
+      createEnvToolbar: () => new MockElement("div"),
+    },
+    playgroundSystem: {
+      hasFullscreenOpen: () => false,
+      closeFullscreen() {},
+      resetCurrentDocument() {},
+      initializeCurlPlaygrounds() {},
+    },
+    exportSystem: null,
+    closeSidebar() {},
+  });
+
+  try {
+    await treeSystem.loadDocsTree();
+
+    const treeError = docList.querySelector(".errorText");
+    assert.ok(treeError);
+    assert.equal(treeError.textContent, maliciousError);
+    assert.equal(docList.querySelector("img"), null);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("docs tree renders document load errors as plain text", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = createDocument();
+  global.window = {
+    matchMedia: () => ({ matches: false }),
+  };
+
+  const docList = new MockElement("div");
+  const docContent = new MockElement("div");
+  const maliciousError = '<img src=x onerror="alert(1)">';
+
+  const treeResponse = createResponse(true, {
+    tree: [{ type: "file", name: "page.md", path: "page.md" }],
+  });
+
+  const treeSystem = createDocsTreeSystem({
+    docList,
+    docContent,
+    apiFetch: async (url) => {
+      if (String(url).includes("/api/docs/tree")) {
+        return treeResponse;
+      }
+      return createResponse(false, { error: maliciousError });
+    },
+    parseJsonSafe: async (response) => response.data,
+    withBasePath: (value) => value,
+    envManager: {
+      collectPlaceholderNamesFromDocument: () => [],
+      createEnvToolbar: () => new MockElement("div"),
+    },
+    playgroundSystem: {
+      hasFullscreenOpen: () => false,
+      closeFullscreen() {},
+      resetCurrentDocument() {},
+      initializeCurlPlaygrounds() {},
+    },
+    exportSystem: null,
+    closeSidebar() {},
+  });
+
+  try {
+    await treeSystem.loadDocsTree();
+
+    const docError = docContent.querySelector(".errorText");
+    assert.ok(docError);
+    assert.equal(docError.textContent, `Error: ${maliciousError}`);
+    assert.equal(docContent.querySelector("img"), null);
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
