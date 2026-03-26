@@ -32,11 +32,11 @@ export function createProgram({
     .addHelpText(
       "after",
       `
-Examples:
-	$ doccurl --version
-	$ doccurl init my-api-docs
-	$ doccurl serve --port 8080 --dir docs --password secret
-	$ doccurl generate-md postman.json --format auto --out docs/imported
+	Examples:
+		$ doccurl --version
+		$ doccurl init my-api-docs
+		$ doccurl serve --port 8080 --dir docs --password
+		$ doccurl generate-md postman.json --format auto --out docs/imported
 
 For full per-command details:
 	$ doccurl serve --help

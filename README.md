@@ -72,14 +72,14 @@ Options:
 - `-d, --dir <dir>`: Docs directory. Default `docs`.
 - `--dev`: Development mode (allows localhost/private targets).
 - `--collapse`: Enables the `Focus Curls` toggle in the docs UI.
-- `--password <password>`: Enables auth. Required in non-dev mode.
+- `--password`: Prompts for a hidden password. Required in non-dev mode.
 
 Examples:
 
 ```bash
 doccurl serve --dev
 doccurl serve -p 8080 -d ./documentation
-doccurl serve --password mySecret123
+doccurl serve --password
 ```
 
 ### `doccurl generate-md <inputFile>`
