@@ -13,6 +13,7 @@ export function createApp({
   isDev = false,
   configuredPassword = "",
   frontendDir,
+  authRouteOptions = {},
   curlRouteOptions = {},
   docsRouteOptions = {},
   features = {},
@@ -45,6 +46,7 @@ export function createApp({
     configuredPassword,
     sessionSecret,
     features,
+    ...authRouteOptions,
   });
 
   app.use("/api", createAuthRequiredMiddleware({ authEnabled, isAuthenticated }));

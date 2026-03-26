@@ -7,6 +7,7 @@ import { once } from "node:events";
 import net from "node:net";
 
 import { startServer } from "../../server/index.js";
+import { createLoginRateLimiter } from "../../server/routes/auth.js";
 
 let portsBlocked = false;
 let portsChecked = false;
@@ -53,6 +54,7 @@ async function withServer(
     dev = false,
     password = "",
     collapse = false,
+    authRouteOptions = {},
     curlRouteOptions = {},
     docsRouteOptions = {},
   },
@@ -78,6 +80,7 @@ async function withServer(
       password,
       collapse,
       host: "127.0.0.1",
+      authRouteOptions,
       curlRouteOptions,
       docsRouteOptions,
     });
@@ -184,6 +187,73 @@ test("protected APIs are blocked until login succeeds", async () => {
         assert.equal(docResponse.status, 200);
         const docPayload = await docResponse.json();
         assert.match(docPayload.html, /Nested page/);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login is rate limited after repeated failures and recovers after the lockout window", async () => {
+  const docsDir = createTempDocs();
+  const nowRef = { value: 1_000 };
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            now: () => nowRef.value,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+          const invalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: "wrong" }),
+          });
+
+          assert.equal(invalidLogin.status, 401);
+          assert.equal(invalidLogin.headers.get("retry-after"), null);
+        }
+
+        const fifthInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        const fifthInvalidPayload = await fifthInvalidLogin.json();
+        assert.equal(fifthInvalidLogin.status, 429);
+        assert.equal(
+          fifthInvalidPayload.error,
+          "Too many login attempts. Try again later.",
+        );
+        assert.equal(fifthInvalidLogin.headers.get("retry-after"), "900");
+
+        const blockedLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(blockedLogin.status, 429);
+        assert.equal(blockedLogin.headers.get("retry-after"), "900");
+
+        nowRef.value += 15 * 60 * 1000 + 1;
+
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(loginResponse.status, 200);
       },
     );
     if (!started) {

@@ -27,6 +27,7 @@ export function startServer(port = 3000, projectName, options = {}) {
     isDev,
     configuredPassword,
     frontendDir,
+    authRouteOptions: options.authRouteOptions || {},
     curlRouteOptions: options.curlRouteOptions || {},
     docsRouteOptions: options.docsRouteOptions || {},
     features: {
