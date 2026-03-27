@@ -21,7 +21,7 @@ export function createApp({
 }) {
   const authEnabled = isDev ? configuredPassword.length > 0 : true;
   if (!isDev && configuredPassword.length === 0) {
-    throw new Error("Production mode requires --password");
+    throw new Error("Production mode requires --password or DOCCURL_PASSWORD");
   }
 
   const app = express();

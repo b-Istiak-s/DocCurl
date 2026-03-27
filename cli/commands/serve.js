@@ -161,14 +161,17 @@ Notes:
   • Use 0.0.0.0 only for intentional network exposure.
   • --dev relaxes production URL target restrictions.
   • --collapse enables a curl-focused reading mode in the UI.
-  • --password prompts for a hidden password; it is required in non-dev mode.
+  • --password prompts for a hidden password.
+  • In non-dev mode, provide a password with --password or DOCCURL_PASSWORD.
+  • Use DOCCURL_PASSWORD for non-interactive launches such as PM2/systemd.
 
 Examples:
   $ doccurl serve
   $ doccurl serve --port 8080 --dir docs
   $ doccurl serve --host 0.0.0.0 --port 8080
   $ doccurl serve --dev --collapse
-  $ doccurl serve --password`,
+  $ doccurl serve --password
+  $ DOCCURL_PASSWORD=change-me doccurl serve`,
     )
     .action(async (options) => {
       const port = Number.parseInt(options.port, 10);

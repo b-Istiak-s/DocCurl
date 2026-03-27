@@ -131,9 +131,47 @@ test("production mode requires password", () => {
   try {
     assert.throws(
       () => startServer(0, docsDir, { dev: false, password: "" }),
-      /requires --password/i,
+      /requires --password or DOCCURL_PASSWORD/i,
     );
   } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("production mode accepts DOCCURL_PASSWORD for non-interactive launches", async () => {
+  const docsDir = createTempDocs();
+  const originalPassword = process.env.DOCCURL_PASSWORD;
+
+  process.env.DOCCURL_PASSWORD = "env-secret-123";
+
+  try {
+    const started = await withServer(
+      { docsDir, dev: false, password: "" },
+      async ({ baseUrl }) => {
+        const invalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(invalidLogin.status, 401);
+
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "env-secret-123" }),
+        });
+        assert.equal(loginResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalPassword === undefined) {
+      delete process.env.DOCCURL_PASSWORD;
+    } else {
+      process.env.DOCCURL_PASSWORD = originalPassword;
+    }
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
 });
