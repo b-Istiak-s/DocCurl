@@ -1,8 +1,47 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { Command } from "commander";
 
-import { registerServeCommand } from "../../cli/commands/serve.js";
+import {
+  promptPasswordFromTty,
+  registerServeCommand,
+} from "../../cli/commands/serve.js";
+
+function createMockTty({ readableEncoding } = {}) {
+  const stdin = new EventEmitter();
+  stdin.isTTY = true;
+  stdin.isRaw = false;
+  stdin.readableEncoding = readableEncoding;
+  stdin.rawModeCalls = [];
+  stdin.encodingCalls = [];
+  stdin.resumeCalls = 0;
+  stdin.pauseCalls = 0;
+  stdin.setRawMode = (value) => {
+    stdin.isRaw = value;
+    stdin.rawModeCalls.push(value);
+  };
+  stdin.setEncoding = (value) => {
+    stdin.readableEncoding = value;
+    stdin.encodingCalls.push(value);
+  };
+  stdin.resume = () => {
+    stdin.resumeCalls += 1;
+  };
+  stdin.pause = () => {
+    stdin.pauseCalls += 1;
+  };
+
+  const stdout = {
+    isTTY: true,
+    writes: [],
+    write(value) {
+      stdout.writes.push(value);
+    },
+  };
+
+  return { stdin, stdout };
+}
 
 test("serve command forwards the collapse flag to startServer", async () => {
   let receivedCall = null;
@@ -85,4 +124,46 @@ test("serve command surfaces prompt errors when --password is used without an in
     program.parseAsync(["node", "doccurl", "serve", "--password"]),
     /Interactive TTY required when using --password/i,
   );
+});
+
+test("promptPasswordFromTty restores stdin encoding to null when it was previously unset", async () => {
+  const { stdin, stdout } = createMockTty();
+  const prompt = promptPasswordFromTty({ stdin, stdout });
+
+  stdin.emit("data", "secret123\r");
+
+  await assert.doesNotReject(prompt);
+  assert.deepEqual(stdin.encodingCalls, ["utf8", null]);
+  assert.deepEqual(stdin.rawModeCalls, [true, false]);
+  assert.equal(stdin.pauseCalls, 1);
+});
+
+test("promptPasswordFromTty rejects when stdin ends before newline", async () => {
+  const { stdin, stdout } = createMockTty({ readableEncoding: "latin1" });
+  const prompt = promptPasswordFromTty({ stdin, stdout });
+
+  stdin.emit("end");
+
+  await assert.rejects(prompt, (error) => {
+    assert.equal(error.code, "PROMPT_ENDED");
+    assert.match(error.message, /ended before input was completed/i);
+    return true;
+  });
+  assert.deepEqual(stdin.encodingCalls, ["utf8", "latin1"]);
+  assert.deepEqual(stdin.rawModeCalls, [true, false]);
+});
+
+test("promptPasswordFromTty rejects when stdin closes before newline", async () => {
+  const { stdin, stdout } = createMockTty();
+  const prompt = promptPasswordFromTty({ stdin, stdout });
+
+  stdin.emit("close");
+
+  await assert.rejects(prompt, (error) => {
+    assert.equal(error.code, "PROMPT_CLOSED");
+    assert.match(error.message, /closed before input was completed/i);
+    return true;
+  });
+  assert.deepEqual(stdin.encodingCalls, ["utf8", null]);
+  assert.deepEqual(stdin.rawModeCalls, [true, false]);
 });

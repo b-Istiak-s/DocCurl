@@ -17,7 +17,22 @@ export async function promptPasswordFromTty({
     let password = "";
     let settled = false;
     const previousRawMode = Boolean(stdin.isRaw);
+    const hadPreviousEncoding = stdin.readableEncoding != null;
     const previousEncoding = typeof stdin.readableEncoding === "string" ? stdin.readableEncoding : null;
+
+    const cleanup = () => {
+      stdin.removeListener("data", handleData);
+      stdin.removeListener("error", handleError);
+      stdin.removeListener("end", handleEnd);
+      stdin.removeListener("close", handleClose);
+      stdin.setRawMode(previousRawMode);
+      if (typeof stdin.pause === "function") {
+        stdin.pause();
+      }
+      if (typeof stdin.setEncoding === "function") {
+        stdin.setEncoding(hadPreviousEncoding ? previousEncoding : null);
+      }
+    };
 
     const finish = (error, value) => {
       if (settled) {
@@ -25,25 +40,36 @@ export async function promptPasswordFromTty({
       }
       settled = true;
 
-      stdin.removeListener("data", handleData);
-      stdin.removeListener("error", handleError);
-      stdin.setRawMode(previousRawMode);
-      if (typeof stdin.pause === "function") {
-        stdin.pause();
+      let cleanupError = null;
+      try {
+        cleanup();
+      } catch (caughtError) {
+        cleanupError = caughtError;
       }
-      if (previousEncoding && typeof stdin.setEncoding === "function") {
-        stdin.setEncoding(previousEncoding);
-      }
+
       stdout.write("\n");
 
-      if (error) {
-        reject(error);
+      if (error || cleanupError) {
+        const failure = error || cleanupError;
+        reject(failure);
         return;
       }
       resolve(value);
     };
 
     const handleError = (error) => {
+      finish(error);
+    };
+
+    const handleEnd = () => {
+      const error = new Error("Password prompt ended before input was completed");
+      error.code = "PROMPT_ENDED";
+      finish(error);
+    };
+
+    const handleClose = () => {
+      const error = new Error("Password prompt closed before input was completed");
+      error.code = "PROMPT_CLOSED";
       finish(error);
     };
 
@@ -70,16 +96,22 @@ export async function promptPasswordFromTty({
       }
     };
 
-    stdout.write("Password: ");
-    if (typeof stdin.setEncoding === "function") {
-      stdin.setEncoding("utf8");
+    try {
+      stdout.write("Password: ");
+      if (typeof stdin.setEncoding === "function") {
+        stdin.setEncoding("utf8");
+      }
+      stdin.setRawMode(true);
+      if (typeof stdin.resume === "function") {
+        stdin.resume();
+      }
+      stdin.on("data", handleData);
+      stdin.on("error", handleError);
+      stdin.on("end", handleEnd);
+      stdin.on("close", handleClose);
+    } catch (error) {
+      finish(error);
     }
-    stdin.setRawMode(true);
-    if (typeof stdin.resume === "function") {
-      stdin.resume();
-    }
-    stdin.on("data", handleData);
-    stdin.on("error", handleError);
   });
 }
 
