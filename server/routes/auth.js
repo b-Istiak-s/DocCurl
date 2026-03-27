@@ -9,8 +9,32 @@ const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 5;
 
+function getTrustedForwardedClientIp(req) {
+  if (!req.app?.get("trust proxy")) {
+    return null;
+  }
+
+  const forwardedFor = req.headers["x-forwarded-for"];
+  const forwardedValue = Array.isArray(forwardedFor)
+    ? forwardedFor.join(",")
+    : forwardedFor;
+  if (typeof forwardedValue !== "string") {
+    return null;
+  }
+
+  return forwardedValue
+    .split(",")
+    .map((value) => value.trim())
+    .find(Boolean) || null;
+}
+
 function getLoginClientKey(req) {
-  return String(req.ip || req.socket?.remoteAddress || "unknown");
+  return String(
+    getTrustedForwardedClientIp(req) ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      "unknown",
+  );
 }
 
 function trimFailureTimestamps(timestamps, now, windowMs) {

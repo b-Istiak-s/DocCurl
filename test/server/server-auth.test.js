@@ -52,6 +52,7 @@ async function withServer(
   {
     docsDir,
     dev = false,
+    trustProxy,
     password = "",
     collapse = false,
     authRouteOptions = {},
@@ -77,6 +78,7 @@ async function withServer(
   try {
     server = startServer(0, docsDir, {
       dev,
+      trustProxy,
       password,
       collapse,
       host: "127.0.0.1",
@@ -260,6 +262,170 @@ test("login is rate limited after repeated failures and recovers after the locko
       return;
     }
   } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login rate limiting uses the first trusted forwarded client IP", async () => {
+  const docsDir = createTempDocs();
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        trustProxy: true,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 2,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 10.0.0.1",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 401);
+
+        const secondInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 10.0.0.2",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(secondInvalidLogin.status, 429);
+        assert.equal(secondInvalidLogin.headers.get("retry-after"), "60");
+
+        const differentClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11, 10.0.0.3",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(differentClientLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login rate limiting ignores forwarded client IPs when proxy trust is disabled", async () => {
+  const docsDir = createTempDocs();
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 2,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 401);
+
+        const secondInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(secondInvalidLogin.status, 429);
+        assert.equal(secondInvalidLogin.headers.get("retry-after"), "60");
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("TRUST_PROXY enables forwarded client handling for auth rate limiting", async () => {
+  const docsDir = createTempDocs();
+  const originalTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = "yes";
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 1,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 429);
+
+        const differentClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(differentClientLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalTrustProxy == null) {
+      delete process.env.TRUST_PROXY;
+    } else {
+      process.env.TRUST_PROXY = originalTrustProxy;
+    }
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
 });

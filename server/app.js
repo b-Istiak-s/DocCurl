@@ -11,6 +11,7 @@ import { createAuthRequiredMiddleware } from "./middleware/auth-required.js";
 export function createApp({
   docsDir,
   isDev = false,
+  trustProxy = false,
   configuredPassword = "",
   frontendDir,
   authRouteOptions = {},
@@ -26,6 +27,8 @@ export function createApp({
   const app = express();
   const markdownRenderer = new MarkdownIt();
   const sessionSecret = crypto.randomBytes(32);
+
+  app.set("trust proxy", trustProxy);
 
   function isAuthenticated(req) {
     if (!authEnabled) {

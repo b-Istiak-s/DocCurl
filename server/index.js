@@ -8,6 +8,32 @@ import { parseCookies, isSessionTokenValid, createSessionToken } from "../core/a
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function parseBooleanValue(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    case "":
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+      return false;
+    default:
+      return null;
+  }
+}
+
 export function startServer(port = 3000, projectName, options = {}) {
   const envPort = Number.parseInt(process.env.PORT || "", 10);
   const effectivePort = Number.isFinite(port) ? port : Number.isFinite(envPort) ? envPort : 3000;
@@ -18,6 +44,8 @@ export function startServer(port = 3000, projectName, options = {}) {
 
   const isDev = Boolean(options.dev);
   const collapse = Boolean(options.collapse);
+  const trustProxy =
+    parseBooleanValue(options.trustProxy) ?? parseBooleanValue(process.env.TRUST_PROXY) ?? false;
   const configuredPassword = typeof options.password === "string" ? options.password : "";
   const frontendDir = options.frontendDir || path.resolve(__dirname, "../frontend");
   const host = typeof options.host === "string" && options.host ? options.host : undefined;
@@ -25,6 +53,7 @@ export function startServer(port = 3000, projectName, options = {}) {
   const { app, authEnabled } = createApp({
     docsDir,
     isDev,
+    trustProxy,
     configuredPassword,
     frontendDir,
     authRouteOptions: options.authRouteOptions || {},

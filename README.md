@@ -82,6 +82,11 @@ doccurl serve -p 8080 -d ./documentation
 doccurl serve --password mySecret123
 ```
 
+Reverse proxy note:
+
+- Set `TRUST_PROXY=1` when DocCurl runs behind a trusted reverse proxy such as nginx so auth rate limiting uses the real client IP from `X-Forwarded-For`.
+- Only enable `TRUST_PROXY` when the proxy is under your control and is responsible for setting `X-Forwarded-For`.
+
 ### `doccurl generate-md <inputFile>`
 
 Generates DocCurl markdown from Postman, Insomnia, or Hoppscotch JSON.
