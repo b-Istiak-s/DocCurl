@@ -527,6 +527,61 @@ test("TRUST_PROXY enables forwarded client handling for auth rate limiting", asy
   }
 });
 
+test("TRUST_PROXY preserves numeric hop counts for auth rate limiting", async () => {
+  const docsDir = createTempDocs();
+  const originalTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = "1";
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 1,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 203.0.113.20",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 429);
+
+        const sameResolvedClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11, 203.0.113.20",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(sameResolvedClientLogin.status, 429);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalTrustProxy == null) {
+      delete process.env.TRUST_PROXY;
+    } else {
+      process.env.TRUST_PROXY = originalTrustProxy;
+    }
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("path traversal is rejected for docs content endpoint", async () => {
   const docsDir = createTempDocs();
   try {

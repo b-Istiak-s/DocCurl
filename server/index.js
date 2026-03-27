@@ -12,8 +12,13 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function parseBooleanValue(value) {
-  if (typeof value === "boolean") {
+function parseTrustProxyValue(value) {
+  if (
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "function" ||
+    Array.isArray(value)
+  ) {
     return value;
   }
 
@@ -21,20 +26,23 @@ function parseBooleanValue(value) {
     return null;
   }
 
-  switch (value.trim().toLowerCase()) {
-    case "1":
+  const trimmed = value.trim();
+  const normalized = trimmed.toLowerCase();
+
+  switch (normalized) {
+    case "":
+    case "0":
+      return false;
     case "true":
     case "yes":
     case "on":
       return true;
-    case "":
-    case "0":
     case "false":
     case "no":
     case "off":
       return false;
     default:
-      return null;
+      return /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : trimmed;
   }
 }
 
@@ -65,8 +73,8 @@ export function startServer(port = 3000, projectName, options = {}) {
   const isDev = Boolean(options.dev);
   const collapse = Boolean(options.collapse);
   const trustProxy =
-    parseBooleanValue(options.trustProxy) ??
-    parseBooleanValue(process.env.TRUST_PROXY) ??
+    parseTrustProxyValue(options.trustProxy) ??
+    parseTrustProxyValue(process.env.TRUST_PROXY) ??
     false;
   const configuredPassword =
     typeof options.password === "string" ? options.password : "";
