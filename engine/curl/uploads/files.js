@@ -102,7 +102,7 @@ export async function prepareMountedUploads(
   const usedNames = new Set();
 
   try {
-    await chmodImpl(tempDir, 0o755);
+    await chmodImpl(tempDir, 0o700);
 
     for (const part of mountableParts) {
       let sourceFilename;
@@ -133,7 +133,7 @@ export async function prepareMountedUploads(
         }
       }
 
-      await chmodImpl(tempFilePath, 0o644);
+      await chmodImpl(tempFilePath, 0o600);
       mountedFilePaths.set(part, `${GENERATED_UPLOAD_MOUNT_ROOT}/${mountedFilename}`);
     }
   } catch (error) {

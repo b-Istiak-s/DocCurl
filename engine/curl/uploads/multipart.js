@@ -36,6 +36,7 @@ export async function parseMultipartUploadRequest(
     BusboyImpl = Busboy,
     mkdtempImpl = fs.mkdtemp,
     mkdirImpl = fs.mkdir,
+    chmodImpl = fs.chmod,
     rmImpl = fs.rm,
     createWriteStreamImpl = nodeFs.createWriteStream,
     logger = console,
@@ -48,7 +49,9 @@ export async function parseMultipartUploadRequest(
   try {
     tempDir = await mkdtempImpl(path.join(tmpDir, "doccurl-upload-"));
     incomingDir = path.join(tempDir, INCOMING_UPLOAD_DIR);
+    await chmodImpl(tempDir, 0o700);
     await mkdirImpl(incomingDir, { recursive: true });
+    await chmodImpl(incomingDir, 0o700);
     parser = BusboyImpl({
       headers: req.headers,
       limits: {
@@ -318,8 +321,13 @@ export async function parseMultipartUploadRequest(
         fileState.abort(error);
       };
 
-      const onWriteFinish = () => {
-        finishFile();
+      const onWriteFinish = async () => {
+        try {
+          await chmodImpl(tempFilePath, 0o600);
+          finishFile();
+        } catch (error) {
+          fileState.abort(error);
+        }
       };
 
       fileStream.on("data", onData);

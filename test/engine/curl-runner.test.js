@@ -430,8 +430,8 @@ test("POST /api/run-curl mounts generated multipart uploads and rewrites curl ar
   assert.equal(writes.length, 1);
   assert.equal(writes[0].filePath, "/tmp/doccurl-upload-test/avatar.png");
   assert.deepEqual(chmods, [
-    { targetPath: "/tmp/doccurl-upload-test", mode: 0o755 },
-    { targetPath: "/tmp/doccurl-upload-test/avatar.png", mode: 0o644 },
+    { targetPath: "/tmp/doccurl-upload-test", mode: 0o700 },
+    { targetPath: "/tmp/doccurl-upload-test/avatar.png", mode: 0o600 },
   ]);
   assert.equal(removals.length, 1);
   assert.deepEqual(removals[0], {
@@ -443,13 +443,21 @@ test("POST /api/run-curl mounts generated multipart uploads and rewrites curl ar
 test("POST /api/run-curl accepts browser multipart uploads and mounts them by upload index", async () => {
   const calls = [];
   const inspectedUploads = [];
+  const chmods = [];
+  let browserUploadTempDir;
 
-  const started = await withTempDir("doccurl-upload-browser-", async (uploadTempDir) =>
+  const started = await withTempDir("doccurl-upload-browser-", async (uploadTempDir) => {
+    browserUploadTempDir = uploadTempDir;
+    return (
     withServer(
       {
         isDev: false,
         dnsLookup: async () => [{ address: "8.8.8.8" }],
         uploadFsMkdtemp: async () => uploadTempDir,
+        uploadFsChmod: async (targetPath, mode) => {
+          chmods.push({ targetPath, mode });
+          await fs.chmod(targetPath, mode);
+        },
         execFileImpl: (command, args, _options, callback) => {
           calls.push({ command, args });
 
@@ -489,8 +497,9 @@ test("POST /api/run-curl accepts browser multipart uploads and mounts them by up
         assert.equal(response.status, 200);
         assert.equal(data.success, true);
       },
-    ),
-  );
+    )
+    );
+  });
   if (!started) {
     return;
   }
@@ -507,6 +516,35 @@ test("POST /api/run-curl accepts browser multipart uploads and mounts them by up
       value: "browser-file",
     },
   ]);
+  assert.equal(
+    chmods.some(
+      ({ targetPath, mode }) => targetPath === browserUploadTempDir && mode === 0o700,
+    ),
+    true,
+  );
+  assert.equal(
+    chmods.some(
+      ({ targetPath, mode }) =>
+        targetPath === path.join(browserUploadTempDir, ".incoming") && mode === 0o700,
+    ),
+    true,
+  );
+  assert.equal(
+    chmods.some(
+      ({ targetPath, mode }) =>
+        targetPath === path.join(browserUploadTempDir, ".incoming", "part-0") &&
+        mode === 0o600,
+    ),
+    true,
+  );
+  assert.equal(
+    chmods.some(
+      ({ targetPath, mode }) =>
+        targetPath === path.join(browserUploadTempDir, "Therapy_License.pdf") &&
+        mode === 0o600,
+    ),
+    true,
+  );
 });
 
 test("POST /api/run-curl rejects browser-upload-backed multipart fields when files are missing", async () => {
@@ -799,13 +837,14 @@ test("POST /api/run-curl keeps multipart text fields while mounting generated up
   assert.equal(writes.length, 1);
   assert.equal(writes[0].filePath, "/tmp/doccurl-upload-mixed/license.pdf");
   assert.deepEqual(chmods, [
-    { targetPath: "/tmp/doccurl-upload-mixed", mode: 0o755 },
-    { targetPath: "/tmp/doccurl-upload-mixed/license.pdf", mode: 0o644 },
+    { targetPath: "/tmp/doccurl-upload-mixed", mode: 0o700 },
+    { targetPath: "/tmp/doccurl-upload-mixed/license.pdf", mode: 0o600 },
   ]);
 });
 
 test("POST /api/run-curl cleans up generated uploads when execution fails", async () => {
   const removals = [];
+  const loggedErrors = [];
   const started = await withServer(
     {
       isDev: false,
@@ -816,6 +855,9 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
       uploadFsChmod: async () => {},
       uploadFsRm: async (targetPath, options) => {
         removals.push({ targetPath, options });
+      },
+      logger: {
+        error: (message, details) => loggedErrors.push({ message, details }),
       },
       execFileImpl: (_command, _args, _options, callback) => {
         callback(new Error("boom"), "", "upload failed");
@@ -831,18 +873,66 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
       });
       const data = await response.json();
       assert.equal(response.status, 500);
-      assert.match(data.details, /upload failed/i);
+      assert.equal(data.error, "Execution failed");
+      assert.equal(Object.hasOwn(data, "details"), false);
     },
   );
   if (!started) {
     return;
   }
 
+  assert.equal(loggedErrors.length, 1);
+  assert.equal(loggedErrors[0].message, "Curl execution failed");
+  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.deepEqual(loggedErrors[0].details.error, {
+    message: "Execution failed",
+  });
+  assert.equal(Object.hasOwn(loggedErrors[0].details, "stderr"), false);
   assert.equal(removals.length, 1);
   assert.deepEqual(removals[0], {
     targetPath: "/tmp/doccurl-upload-failure",
     options: { recursive: true, force: true },
   });
+});
+
+test("POST /api/run-curl strips credentials and query params from logged request URLs", async () => {
+  const loggedErrors = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      logger: {
+        error: (message, details) => loggedErrors.push({ message, details }),
+      },
+      execFileImpl: () => {
+        throw new Error("boom");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command:
+            'curl "https://user:secret@api.example.com/upload?token=top-secret&mode=debug#frag"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 500);
+      assert.equal(data.error, "Execution failed");
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(loggedErrors.length, 1);
+  assert.equal(loggedErrors[0].message, "Curl execution failed");
+  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.deepEqual(loggedErrors[0].details.error, {
+    message: "Execution failed",
+  });
+  assert.equal(Object.hasOwn(loggedErrors[0].details, "stderr"), false);
 });
 
 test("POST /api/run-curl cleans up generated uploads when mount preparation fails", async () => {
@@ -916,6 +1006,42 @@ test("POST /api/run-curl returns upstream status, content type, and timing metad
         statusCode: 201,
         contentType: "application/json; charset=utf-8",
         durationMs: 245,
+      });
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl preserves upstream HTTP 500 responses in output metadata", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl: (_command, _args, _options, callback) => {
+        callback(
+          null,
+          `{"error":"upstream"}${CURL_RESPONSE_META_START}500\tapplication/json\t0.103${CURL_RESPONSE_META_END}`,
+          "",
+        );
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/fail"' }),
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.equal(data.output, '{"error":"upstream"}');
+      assert.deepEqual(data.metadata, {
+        statusCode: 500,
+        contentType: "application/json",
+        durationMs: 103,
       });
     },
   );

@@ -1155,7 +1155,7 @@ export function createPlaygroundSystem({
         return;
       }
 
-      const errorText = data.error || data.details || "Request failed";
+      const errorText = data.error || "Request failed";
       renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
     } catch (error) {
       if (error.code === "UNAUTHORIZED") {
