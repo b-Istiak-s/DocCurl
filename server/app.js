@@ -11,8 +11,10 @@ import { createAuthRequiredMiddleware } from "./middleware/auth-required.js";
 export function createApp({
   docsDir,
   isDev = false,
+  trustProxy = false,
   configuredPassword = "",
   frontendDir,
+  authRouteOptions = {},
   curlRouteOptions = {},
   docsRouteOptions = {},
   features = {},
@@ -27,6 +29,8 @@ export function createApp({
   const sessionSecret = crypto.randomBytes(32);
   const secureSessionCookie = !isDev;
 
+  app.set("trust proxy", trustProxy);
+
   function isAuthenticated(req) {
     if (!authEnabled) {
       return true;
@@ -40,7 +44,8 @@ export function createApp({
   app.use(express.json({ limit: "128kb" }));
   app.use(express.static(frontendDir));
 
-  registerAuthRoutes(app, {
+  const disposeAuthRoutes = registerAuthRoutes(app, {
+    ...authRouteOptions,
     authEnabled,
     isAuthenticated,
     configuredPassword,
@@ -66,5 +71,11 @@ export function createApp({
     res.sendFile(path.join(frontendDir, "index.html"));
   });
 
-  return { app, authEnabled };
+  return {
+    app,
+    authEnabled,
+    cleanup() {
+      disposeAuthRoutes?.();
+    },
+  };
 }
