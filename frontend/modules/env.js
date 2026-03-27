@@ -248,8 +248,10 @@ export function createEnvManager({
     hint.textContent =
       "Add environment variables to replace matching $VARIABLE placeholders before running curl commands.";
 
-    const warning = documentRef.createElement("div");
+    const warning = documentRef.createElement("p");
     warning.className = "envToolbarWarning";
+    warning.setAttribute("role", "status");
+    warning.setAttribute("aria-live", "polite");
     warning.textContent =
       "Warning: values are stored in this browser's localStorage for this site. Avoid long-lived secrets in shared or untrusted browsers.";
 
