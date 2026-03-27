@@ -75,12 +75,18 @@ function escapeHtmlAttribute(value) {
 }
 
 function clearElementChildren(element) {
-  if (typeof element?.replaceChildren === "function") {
+  if (!element) {
+    return;
+  }
+
+  if (typeof element.replaceChildren === "function") {
     element.replaceChildren();
     return;
   }
 
-  element.innerHTML = "";
+  if ("innerHTML" in element) {
+    element.innerHTML = "";
+  }
 }
 
 function renderTextBlock(
@@ -134,32 +140,47 @@ function isSafeDocumentUrl(value, { allowDataImage = false } = {}) {
   return false;
 }
 
-function sanitizeHtmlAttributes(tagName, rawAttributes) {
+function filterSanitizedAttribute(tagName, attributeName, attributeValue) {
   const allowedAttributes = ALLOWED_HTML_ATTRIBUTES[tagName] || new Set();
+  const normalizedName = String(attributeName || "").toLowerCase();
+  const normalizedValue = String(attributeValue ?? "");
+
+  if (
+    !allowedAttributes.has(normalizedName) ||
+    normalizedName.startsWith("on") ||
+    normalizedName === "style"
+  ) {
+    return null;
+  }
+
+  if (
+    (normalizedName === "href" && !isSafeDocumentUrl(normalizedValue)) ||
+    (normalizedName === "src" &&
+      !isSafeDocumentUrl(normalizedValue, { allowDataImage: tagName === "img" }))
+  ) {
+    return null;
+  }
+
+  return [normalizedName, normalizedValue];
+}
+
+function sanitizeHtmlAttributes(tagName, rawAttributes) {
   const sanitizedAttributes = [];
   const attributePattern =
     /([A-Za-z0-9:-]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
   let match;
 
   while ((match = attributePattern.exec(rawAttributes))) {
-    const attributeName = String(match[1] || "").toLowerCase();
-    const attributeValue = match[3] ?? match[4] ?? match[5] ?? "";
-
-    if (
-      !allowedAttributes.has(attributeName) ||
-      attributeName.startsWith("on") ||
-      attributeName === "style"
-    ) {
+    const sanitized = filterSanitizedAttribute(
+      tagName,
+      match[1],
+      match[3] ?? match[4] ?? match[5] ?? "",
+    );
+    if (!sanitized) {
       continue;
     }
 
-    if (
-      (attributeName === "href" && !isSafeDocumentUrl(attributeValue)) ||
-      (attributeName === "src" &&
-        !isSafeDocumentUrl(attributeValue, { allowDataImage: tagName === "img" }))
-    ) {
-      continue;
-    }
+    const [attributeName, attributeValue] = sanitized;
 
     sanitizedAttributes.push(
       ` ${attributeName}="${escapeHtmlAttribute(attributeValue)}"`,
@@ -229,28 +250,18 @@ function appendSanitizedNode(parent, sourceNode, documentRef) {
   }
 
   const safeElement = documentRef.createElement(tagName);
-  const allowedAttributes = ALLOWED_HTML_ATTRIBUTES[tagName] || new Set();
 
   Array.from(sourceNode.attributes || []).forEach((attribute) => {
-    const attributeName = String(attribute.name || "").toLowerCase();
-    const attributeValue = String(attribute.value || "");
-
-    if (
-      !allowedAttributes.has(attributeName) ||
-      attributeName.startsWith("on") ||
-      attributeName === "style"
-    ) {
+    const sanitized = filterSanitizedAttribute(
+      tagName,
+      attribute.name,
+      attribute.value,
+    );
+    if (!sanitized) {
       return;
     }
 
-    if (
-      (attributeName === "href" && !isSafeDocumentUrl(attributeValue)) ||
-      (attributeName === "src" &&
-        !isSafeDocumentUrl(attributeValue, { allowDataImage: tagName === "img" }))
-    ) {
-      return;
-    }
-
+    const [attributeName, attributeValue] = sanitized;
     safeElement.setAttribute(attributeName, attributeValue);
   });
 
@@ -278,7 +289,8 @@ function renderSanitizedDocument(container, html, documentRef, windowRef) {
     return;
   }
 
-  container.innerHTML = sanitizeDocumentHtml(html);
+  clearElementChildren(container);
+  container.textContent = sanitizeDocumentHtml(html);
 }
 
 function isAlwaysVisibleElement(element) {

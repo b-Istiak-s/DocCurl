@@ -482,6 +482,63 @@ test("docs tree renders document load errors as plain text", async () => {
   }
 });
 
+test("docs tree fallback does not interpret sanitized document HTML as live markup", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = createDocument();
+  global.window = {
+    matchMedia: () => ({ matches: false }),
+  };
+
+  const docList = new MockElement("div");
+  const docContent = new MockElement("div");
+
+  const treeResponse = createResponse(true, {
+    tree: [{ type: "file", name: "page.md", path: "page.md" }],
+  });
+
+  const treeSystem = createDocsTreeSystem({
+    docList,
+    docContent,
+    apiFetch: async (url) => {
+      if (String(url).includes("/api/docs/tree")) {
+        return treeResponse;
+      }
+      return createResponse(true, {
+        html: '<p>Loaded</p><img src="javascript:alert(1)" onerror="alert(1)" alt="bad">',
+        markdown: "Loaded",
+      });
+    },
+    parseJsonSafe: async (response) => response.data,
+    withBasePath: (value) => value,
+    envManager: {
+      collectPlaceholderNamesFromDocument: () => [],
+      createEnvToolbar: () => new MockElement("div"),
+    },
+    playgroundSystem: {
+      hasFullscreenOpen: () => false,
+      closeFullscreen() {},
+      resetCurrentDocument() {},
+      initializeCurlPlaygrounds() {},
+    },
+    exportSystem: null,
+    closeSidebar() {},
+  });
+
+  try {
+    await treeSystem.loadDocsTree();
+
+    assert.equal(docContent.querySelector("img"), null);
+    assert.doesNotMatch(docContent.textContent, /onerror=/i);
+    assert.doesNotMatch(docContent.textContent, /javascript:/i);
+    assert.match(docContent.textContent, /<p>Loaded<\/p>/);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
 test("collapsed document view keeps env controls, headings, and curl blocks visible", () => {
   const container = new MockElement("div");
 
