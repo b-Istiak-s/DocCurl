@@ -363,3 +363,32 @@ test("renderCollectionsToMarkdown generates folder files and large-folder reques
   assert.match(authFile.content, /^\| Name \| Requirement \|$/m);
   assert.match(authFile.content, /^```curl$/m);
 });
+
+test("renderCollectionsToMarkdown expands curl code fences when imported content contains backticks", () => {
+  const outputs = renderCollectionsToMarkdown([
+    {
+      name: "Workspace",
+      rootFolder: {
+        name: "Workspace",
+        requests: [
+          createRequest("Fence Breakout Attempt", {
+            curlSpec: {
+              method: "POST",
+              url: "$BASE_URL/upload",
+              headers: [],
+              body: "alpha\n```\n## Injected Heading",
+              formParts: [],
+            },
+          }),
+        ],
+        folders: [],
+      },
+    },
+  ]);
+
+  const workspaceFile = outputs.find((entry) => entry.path === "workspace/workspace.md");
+  assert.ok(workspaceFile);
+  assert.match(workspaceFile.content, /^````curl$/m);
+  assert.match(workspaceFile.content, /## Injected Heading/);
+  assert.match(workspaceFile.content, /^````$/m);
+});

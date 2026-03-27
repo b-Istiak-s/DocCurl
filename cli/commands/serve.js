@@ -18,7 +18,10 @@ export async function promptPasswordFromTty({
     let settled = false;
     const previousRawMode = Boolean(stdin.isRaw);
     const hadPreviousEncoding = stdin.readableEncoding != null;
-    const previousEncoding = typeof stdin.readableEncoding === "string" ? stdin.readableEncoding : null;
+    const previousEncoding =
+      typeof stdin.readableEncoding === "string"
+        ? stdin.readableEncoding
+        : null;
 
     const cleanup = () => {
       stdin.removeListener("data", handleData);
@@ -62,13 +65,17 @@ export async function promptPasswordFromTty({
     };
 
     const handleEnd = () => {
-      const error = new Error("Password prompt ended before input was completed");
+      const error = new Error(
+        "Password prompt ended before input was completed",
+      );
       error.code = "PROMPT_ENDED";
       finish(error);
     };
 
     const handleClose = () => {
-      const error = new Error("Password prompt closed before input was completed");
+      const error = new Error(
+        "Password prompt closed before input was completed",
+      );
       error.code = "PROMPT_CLOSED";
       finish(error);
     };
@@ -132,17 +139,26 @@ export function registerServeCommand(
       "docs",
     )
     .option(
+      "--host <host>",
+      "Host interface to bind (pass to override server default, e.g. 0.0.0.0)",
+    )
+    .option(
       "--dev",
       "Allow localhost/private network targets (development only)",
     )
     .option("--collapse", 'Enable the "Focus Curls"/"Show All" document toggle')
-    .option("--password", "Prompt for a password to protect docs and API routes")
+    .option(
+      "--password",
+      "Prompt for a password to protect docs and API routes",
+    )
     .addHelpText(
       "after",
       `
 Notes:
   • --port must be a valid integer; defaults to 3000.
   • --dir is resolved from the current working directory.
+  • --host is passed through to the server; by default the server binds to 127.0.0.1.
+  • Use 0.0.0.0 only for intentional network exposure.
   • --dev relaxes production URL target restrictions.
   • --collapse enables a curl-focused reading mode in the UI.
   • --password prompts for a hidden password; it is required in non-dev mode.
@@ -150,6 +166,7 @@ Notes:
 Examples:
   $ doccurl serve
   $ doccurl serve --port 8080 --dir docs
+  $ doccurl serve --host 0.0.0.0 --port 8080
   $ doccurl serve --dev --collapse
   $ doccurl serve --password`,
     )
@@ -160,6 +177,7 @@ Examples:
       startServerImpl(port, docsDir, {
         dev: Boolean(options.dev),
         collapse: Boolean(options.collapse),
+        host: options.host,
         password,
       });
     });

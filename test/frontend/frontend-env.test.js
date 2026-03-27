@@ -281,9 +281,13 @@ test("createEnvToolbar allows adding and removing variables and persists them to
   });
 
   const toolbar = envManager.createEnvToolbar(["DOCCURL_BASE_URL"]);
+  const warning = toolbar.querySelector(".envToolbarWarning");
   const nameInputs = toolbar.querySelectorAll(".envNameInput");
   const valueInputs = toolbar.querySelectorAll(".envValueInput");
 
+  assert.ok(warning);
+  assert.match(warning.textContent, /localStorage/i);
+  assert.match(warning.textContent, /avoid long-lived secrets/i);
   assert.equal(nameInputs.length, 1);
   assert.equal(nameInputs[0].value, "DOCCURL_BASE_URL");
   assert.equal(valueInputs[0].value, "http://localhost:3000");

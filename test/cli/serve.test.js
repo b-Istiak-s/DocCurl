@@ -43,7 +43,7 @@ function createMockTty({ readableEncoding } = {}) {
   return { stdin, stdout };
 }
 
-test("serve command forwards the collapse flag to startServer", async () => {
+test("serve command forwards host and collapse options to startServer", async () => {
   let receivedCall = null;
   const program = new Command();
 
@@ -62,6 +62,8 @@ test("serve command forwards the collapse flag to startServer", async () => {
     "4123",
     "--dir",
     "docs",
+    "--host",
+    "0.0.0.0",
     "--dev",
     "--collapse",
   ]);
@@ -72,6 +74,39 @@ test("serve command forwards the collapse flag to startServer", async () => {
   assert.deepEqual(receivedCall.options, {
     dev: true,
     collapse: true,
+    host: "0.0.0.0",
+    password: "",
+  });
+});
+
+test("serve command leaves host undefined when --host is omitted", async () => {
+  let receivedCall = null;
+  const program = new Command();
+
+  registerServeCommand(program, {
+    startServerImpl(port, docsDir, options) {
+      receivedCall = { port, docsDir, options };
+      return { close() {} };
+    },
+  });
+
+  await program.parseAsync([
+    "node",
+    "doccurl",
+    "serve",
+    "--port",
+    "4123",
+    "--dir",
+    "docs",
+  ]);
+
+  assert.ok(receivedCall);
+  assert.equal(receivedCall.port, 4123);
+  assert.match(receivedCall.docsDir, /\/docs$/);
+  assert.deepEqual(receivedCall.options, {
+    dev: false,
+    collapse: false,
+    host: undefined,
     password: "",
   });
 });

@@ -7,6 +7,7 @@ import { once } from "node:events";
 import net from "node:net";
 
 import { startServer } from "../../server/index.js";
+import { createLoginRateLimiter } from "../../server/routes/auth.js";
 
 let portsBlocked = false;
 let portsChecked = false;
@@ -51,8 +52,10 @@ async function withServer(
   {
     docsDir,
     dev = false,
+    trustProxy,
     password = "",
     collapse = false,
+    authRouteOptions = {},
     curlRouteOptions = {},
     docsRouteOptions = {},
   },
@@ -75,9 +78,11 @@ async function withServer(
   try {
     server = startServer(0, docsDir, {
       dev,
+      trustProxy,
       password,
       collapse,
       host: "127.0.0.1",
+      authRouteOptions,
       curlRouteOptions,
       docsRouteOptions,
     });
@@ -133,6 +138,76 @@ test("production mode requires password", () => {
   }
 });
 
+test("startServer binds to 127.0.0.1 by default and logs the bound host", async () => {
+  const docsDir = createTempDocs();
+  const originalConsoleLog = console.log;
+  const loggedLines = [];
+  let server;
+
+  try {
+    if (!portsChecked) {
+      portsChecked = true;
+      portsBlocked = !(await checkPortBinding());
+      if (portsBlocked && !printedPortWarning) {
+        printedPortWarning = true;
+        console.warn("Skipping socket-based server tests: local port binding is blocked.");
+      }
+    }
+
+    if (portsBlocked) {
+      return;
+    }
+
+    console.log = (...args) => {
+      loggedLines.push(args.join(" "));
+    };
+
+    try {
+      server = startServer(0, docsDir, {
+        dev: true,
+        password: "",
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const listenResult = await Promise.race([
+      once(server, "listening").then(() => ({ ok: true })),
+      once(server, "error").then(([error]) => ({ error })),
+    ]);
+
+    if (listenResult.error) {
+      if (listenResult.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw listenResult.error;
+    }
+
+    const addressInfo = server.address();
+    assert.equal(addressInfo.address, "127.0.0.1");
+    assert.equal(loggedLines.some((line) => /http:\/\/127\.0\.0\.1:\d+/.test(line)), true);
+  } finally {
+    console.log = originalConsoleLog;
+    if (server) {
+      await closeServer(server);
+    }
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("protected APIs are blocked until login succeeds", async () => {
   const docsDir = createTempDocs();
   try {
@@ -165,6 +240,9 @@ test("protected APIs are blocked until login succeeds", async () => {
         assert.equal(loginResponse.status, 200);
         const cookieHeader = loginResponse.headers.get("set-cookie");
         assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.match(cookieHeader, /;\s*Secure/i);
         const sessionCookie = cookieHeader.split(";")[0];
         assert.ok(sessionCookie.startsWith("doccurl_session="));
 
@@ -190,6 +268,316 @@ test("protected APIs are blocked until login succeeds", async () => {
       return;
     }
   } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login is rate limited after repeated failures and recovers after the lockout window", async () => {
+  const docsDir = createTempDocs();
+  const nowRef = { value: 1_000 };
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            now: () => nowRef.value,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+          const invalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: "wrong" }),
+          });
+
+          assert.equal(invalidLogin.status, 401);
+          assert.equal(invalidLogin.headers.get("retry-after"), null);
+        }
+
+        const fifthInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        const fifthInvalidPayload = await fifthInvalidLogin.json();
+        assert.equal(fifthInvalidLogin.status, 429);
+        assert.equal(
+          fifthInvalidPayload.error,
+          "Too many login attempts. Try again later.",
+        );
+        assert.equal(fifthInvalidLogin.headers.get("retry-after"), "900");
+
+        const blockedLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(blockedLogin.status, 429);
+        assert.equal(blockedLogin.headers.get("retry-after"), "900");
+
+        nowRef.value += 15 * 60 * 1000 + 1;
+
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(loginResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login rate limiter independently evicts stale client state", async () => {
+  const nowRef = { value: 1_000 };
+  const stateStore = new Map();
+  const limiter = createLoginRateLimiter({
+    now: () => nowRef.value,
+    windowMs: 100,
+    lockoutMs: 100,
+    cleanupIntervalMs: 5,
+    stateStore,
+  });
+
+  try {
+    limiter.recordFailure("198.51.100.10");
+    assert.equal(stateStore.size, 1);
+
+    nowRef.value = 1_500;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(stateStore.size, 0);
+  } finally {
+    limiter.dispose();
+  }
+});
+
+test("login rate limiting uses the trusted proxy-resolved client IP", async () => {
+  const docsDir = createTempDocs();
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        trustProxy: true,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 2,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 10.0.0.1",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 401);
+
+        const secondInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 10.0.0.2",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(secondInvalidLogin.status, 429);
+        assert.equal(secondInvalidLogin.headers.get("retry-after"), "60");
+
+        const differentClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11, 10.0.0.3",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(differentClientLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("login rate limiting ignores forwarded client IPs when proxy trust is disabled", async () => {
+  const docsDir = createTempDocs();
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 2,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 401);
+
+        const secondInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(secondInvalidLogin.status, 429);
+        assert.equal(secondInvalidLogin.headers.get("retry-after"), "60");
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("TRUST_PROXY enables forwarded client handling for auth rate limiting", async () => {
+  const docsDir = createTempDocs();
+  const originalTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = "yes";
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 1,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 429);
+
+        const differentClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(differentClientLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalTrustProxy == null) {
+      delete process.env.TRUST_PROXY;
+    } else {
+      process.env.TRUST_PROXY = originalTrustProxy;
+    }
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("TRUST_PROXY preserves numeric hop counts for auth rate limiting", async () => {
+  const docsDir = createTempDocs();
+  const originalTrustProxy = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = "1";
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          loginRateLimiter: createLoginRateLimiter({
+            maxFailures: 1,
+            windowMs: 60_000,
+            lockoutMs: 60_000,
+            now: () => 1_000,
+          }),
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstInvalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.10, 203.0.113.20",
+          },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(firstInvalidLogin.status, 429);
+
+        const sameResolvedClientLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "198.51.100.11, 203.0.113.20",
+          },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(sameResolvedClientLogin.status, 429);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalTrustProxy == null) {
+      delete process.env.TRUST_PROXY;
+    } else {
+      process.env.TRUST_PROXY = originalTrustProxy;
+    }
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
 });
@@ -423,6 +811,34 @@ test("development mode stays open when password is not provided", async () => {
   }
 });
 
+test("development mode password auth sets a non-secure session cookie", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true, password: "secret123" },
+      async ({ baseUrl }) => {
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+
+        assert.equal(loginResponse.status, 200);
+        const cookieHeader = loginResponse.headers.get("set-cookie");
+        assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.doesNotMatch(cookieHeader, /;\s*Secure/i);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("auth status exposes the collapse feature flag when enabled", async () => {
   const docsDir = createTempDocs();
   try {
@@ -442,6 +858,174 @@ test("auth status exposes the collapse feature flag when enabled", async () => {
     if (!started) {
       return;
     }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("auth route options cannot override auth enablement or password validation", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          authEnabled: false,
+          configuredPassword: "route-secret",
+          features: {
+            contentCollapse: true,
+          },
+        },
+      },
+      async ({ baseUrl }) => {
+        const statusResponse = await fetch(`${baseUrl}/api/auth/status`);
+        const statusPayload = await statusResponse.json();
+        assert.equal(statusPayload.authEnabled, true);
+        assert.equal(statusPayload.authenticated, false);
+        assert.deepEqual(statusPayload.features, {
+          contentCollapse: false,
+        });
+
+        const blockedTree = await fetch(`${baseUrl}/api/docs/tree`);
+        assert.equal(blockedTree.status, 401);
+
+        const overriddenPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "route-secret" }),
+        });
+        assert.equal(overriddenPasswordLogin.status, 401);
+
+        const realPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(realPasswordLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("auth route options cannot override the session secret across restarts", async () => {
+  const docsDir = createTempDocs();
+  const sharedSessionSecret = Buffer.alloc(32, 7);
+
+  try {
+    if (!portsChecked) {
+      portsChecked = true;
+      portsBlocked = !(await checkPortBinding());
+      if (portsBlocked && !printedPortWarning) {
+        printedPortWarning = true;
+        console.warn("Skipping socket-based server tests: local port binding is blocked.");
+      }
+    }
+
+    if (portsBlocked) {
+      return;
+    }
+
+    let firstServer;
+    try {
+      firstServer = startServer(0, docsDir, {
+        dev: false,
+        password: "secret123",
+        host: "127.0.0.1",
+        authRouteOptions: {
+          sessionSecret: sharedSessionSecret,
+        },
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const firstListen = await Promise.race([
+      once(firstServer, "listening").then(() => ({ ok: true })),
+      once(firstServer, "error").then(([error]) => ({ error })),
+    ]);
+    if (firstListen.error) {
+      if (firstListen.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw firstListen.error;
+    }
+
+    const firstAddress = firstServer.address();
+    const firstPort = firstAddress && typeof firstAddress === "object" ? firstAddress.port : 0;
+
+    const loginResponse = await fetch(`http://127.0.0.1:${firstPort}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "secret123" }),
+    });
+    const staleCookie = loginResponse.headers.get("set-cookie").split(";")[0];
+    await closeServer(firstServer);
+
+    let secondServer;
+    try {
+      secondServer = startServer(0, docsDir, {
+        dev: false,
+        password: "secret123",
+        host: "127.0.0.1",
+        authRouteOptions: {
+          sessionSecret: sharedSessionSecret,
+        },
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+    const secondListen = await Promise.race([
+      once(secondServer, "listening").then(() => ({ ok: true })),
+      once(secondServer, "error").then(([error]) => ({ error })),
+    ]);
+    if (secondListen.error) {
+      if (secondListen.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw secondListen.error;
+    }
+
+    const secondAddress = secondServer.address();
+    const secondPort = secondAddress && typeof secondAddress === "object" ? secondAddress.port : 0;
+
+    const blocked = await fetch(`http://127.0.0.1:${secondPort}/api/docs/tree`, {
+      headers: { Cookie: staleCookie },
+    });
+    assert.equal(blocked.status, 401);
+    await closeServer(secondServer);
   } finally {
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
