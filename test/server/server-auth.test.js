@@ -682,3 +682,171 @@ test("auth status exposes the collapse feature flag when enabled", async () => {
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
 });
+
+test("auth route options cannot override auth enablement or password validation", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: false,
+        password: "secret123",
+        authRouteOptions: {
+          authEnabled: false,
+          configuredPassword: "route-secret",
+          features: {
+            contentCollapse: true,
+          },
+        },
+      },
+      async ({ baseUrl }) => {
+        const statusResponse = await fetch(`${baseUrl}/api/auth/status`);
+        const statusPayload = await statusResponse.json();
+        assert.equal(statusPayload.authEnabled, true);
+        assert.equal(statusPayload.authenticated, false);
+        assert.deepEqual(statusPayload.features, {
+          contentCollapse: false,
+        });
+
+        const blockedTree = await fetch(`${baseUrl}/api/docs/tree`);
+        assert.equal(blockedTree.status, 401);
+
+        const overriddenPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "route-secret" }),
+        });
+        assert.equal(overriddenPasswordLogin.status, 401);
+
+        const realPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+        assert.equal(realPasswordLogin.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("auth route options cannot override the session secret across restarts", async () => {
+  const docsDir = createTempDocs();
+  const sharedSessionSecret = Buffer.alloc(32, 7);
+
+  try {
+    if (!portsChecked) {
+      portsChecked = true;
+      portsBlocked = !(await checkPortBinding());
+      if (portsBlocked && !printedPortWarning) {
+        printedPortWarning = true;
+        console.warn("Skipping socket-based server tests: local port binding is blocked.");
+      }
+    }
+
+    if (portsBlocked) {
+      return;
+    }
+
+    let firstServer;
+    try {
+      firstServer = startServer(0, docsDir, {
+        dev: false,
+        password: "secret123",
+        host: "127.0.0.1",
+        authRouteOptions: {
+          sessionSecret: sharedSessionSecret,
+        },
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const firstListen = await Promise.race([
+      once(firstServer, "listening").then(() => ({ ok: true })),
+      once(firstServer, "error").then(([error]) => ({ error })),
+    ]);
+    if (firstListen.error) {
+      if (firstListen.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw firstListen.error;
+    }
+
+    const firstAddress = firstServer.address();
+    const firstPort = firstAddress && typeof firstAddress === "object" ? firstAddress.port : 0;
+
+    const loginResponse = await fetch(`http://127.0.0.1:${firstPort}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "secret123" }),
+    });
+    const staleCookie = loginResponse.headers.get("set-cookie").split(";")[0];
+    await closeServer(firstServer);
+
+    let secondServer;
+    try {
+      secondServer = startServer(0, docsDir, {
+        dev: false,
+        password: "secret123",
+        host: "127.0.0.1",
+        authRouteOptions: {
+          sessionSecret: sharedSessionSecret,
+        },
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+    const secondListen = await Promise.race([
+      once(secondServer, "listening").then(() => ({ ok: true })),
+      once(secondServer, "error").then(([error]) => ({ error })),
+    ]);
+    if (secondListen.error) {
+      if (secondListen.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw secondListen.error;
+    }
+
+    const secondAddress = secondServer.address();
+    const secondPort = secondAddress && typeof secondAddress === "object" ? secondAddress.port : 0;
+
+    const blocked = await fetch(`http://127.0.0.1:${secondPort}/api/docs/tree`, {
+      headers: { Cookie: staleCookie },
+    });
+    assert.equal(blocked.status, 401);
+    await closeServer(secondServer);
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});

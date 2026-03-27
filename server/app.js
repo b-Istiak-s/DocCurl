@@ -44,12 +44,12 @@ export function createApp({
   app.use(express.static(frontendDir));
 
   registerAuthRoutes(app, {
+    ...authRouteOptions,
     authEnabled,
     isAuthenticated,
     configuredPassword,
     sessionSecret,
     features,
-    ...authRouteOptions,
   });
 
   app.use("/api", createAuthRequiredMiddleware({ authEnabled, isAuthenticated }));
