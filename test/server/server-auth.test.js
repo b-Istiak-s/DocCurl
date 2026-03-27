@@ -133,6 +133,76 @@ test("production mode requires password", () => {
   }
 });
 
+test("startServer binds to 127.0.0.1 by default and logs the bound host", async () => {
+  const docsDir = createTempDocs();
+  const originalConsoleLog = console.log;
+  const loggedLines = [];
+  let server;
+
+  try {
+    if (!portsChecked) {
+      portsChecked = true;
+      portsBlocked = !(await checkPortBinding());
+      if (portsBlocked && !printedPortWarning) {
+        printedPortWarning = true;
+        console.warn("Skipping socket-based server tests: local port binding is blocked.");
+      }
+    }
+
+    if (portsBlocked) {
+      return;
+    }
+
+    console.log = (...args) => {
+      loggedLines.push(args.join(" "));
+    };
+
+    try {
+      server = startServer(0, docsDir, {
+        dev: true,
+        password: "",
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const listenResult = await Promise.race([
+      once(server, "listening").then(() => ({ ok: true })),
+      once(server, "error").then(([error]) => ({ error })),
+    ]);
+
+    if (listenResult.error) {
+      if (listenResult.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw listenResult.error;
+    }
+
+    const addressInfo = server.address();
+    assert.equal(addressInfo.address, "127.0.0.1");
+    assert.equal(loggedLines.some((line) => /http:\/\/127\.0\.0\.1:\d+/.test(line)), true);
+  } finally {
+    console.log = originalConsoleLog;
+    if (server) {
+      await closeServer(server);
+    }
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("protected APIs are blocked until login succeeds", async () => {
   const docsDir = createTempDocs();
   try {
