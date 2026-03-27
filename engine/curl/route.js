@@ -81,11 +81,43 @@ function formatMultipartError(error, limits = LIMITS) {
   return error.message || "Invalid multipart upload payload";
 }
 
+function sanitizeLoggedUrl(url) {
+  if (typeof url !== "string" || url.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function summarizeLoggedExecutionError(error) {
+  if (error && typeof error === "object") {
+    const code =
+      typeof error.code === "string" || typeof error.code === "number"
+        ? String(error.code)
+        : null;
+    if (code) {
+      return `Execution failed (${code})`;
+    }
+  }
+
+  return "Execution failed";
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
   const dnsLookup = options.dnsLookup || defaultDnsLookup;
   const containerImage = options.dockerImage || "curlimages/curl";
+  const logger = options.logger || console;
   const runtimeResolver =
     options.runtimeResolver ||
     (() => defaultRuntimeResolver(options.runtimeExecFile || execFile));
@@ -95,7 +127,7 @@ export function setupCurlRoutes(app, options = {}) {
       markerPath: options.noDockerMarkerPath || NODOCKER_MARKER_PATH,
       fsAccess: options.fsAccess || fs.access,
       fsWriteFile: options.fsWriteFile || fs.writeFile,
-      logger: options.logger || console,
+      logger,
     });
   const runtimeOverride = options.containerRuntime;
   const uploadLimits = {
@@ -119,6 +151,15 @@ export function setupCurlRoutes(app, options = {}) {
     return runtimePromise;
   }
 
+  function logCurlExecutionFailure({ requestUrl, error }) {
+    logger.error?.("Curl execution failed", {
+      requestUrl: sanitizeLoggedUrl(requestUrl),
+      error: {
+        message: summarizeLoggedExecutionError(error),
+      },
+    });
+  }
+
   app.post("/api/run-curl", async (req, res) => {
     let requestBody = req.body;
     let requestSpec;
@@ -137,7 +178,7 @@ export function setupCurlRoutes(app, options = {}) {
           rmImpl: options.uploadFsRm || fs.rm,
           createWriteStreamImpl:
             options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
-          logger: options.logger || console,
+          logger,
         });
         requestBody = multipartSession.body;
         uploadFilesByIndex = multipartSession.uploadFilesByIndex;
@@ -175,7 +216,7 @@ export function setupCurlRoutes(app, options = {}) {
             chmodImpl: options.uploadFsChmod || fs.chmod,
             renameImpl: options.uploadFsRename || fs.rename,
             rmImpl: options.uploadFsRm || fs.rm,
-            logger: options.logger || console,
+            logger,
           },
         );
         requestSpec = {
@@ -243,9 +284,12 @@ export function setupCurlRoutes(app, options = {}) {
         (error, stdout, stderr) => {
           finishWithCleanup(() => {
             if (error) {
+              logCurlExecutionFailure({
+                requestUrl: requestSpec.url,
+                error,
+              });
               return res.status(500).json({
                 error: "Execution failed",
-                details: stderr || error.message,
               });
             }
 
@@ -259,10 +303,13 @@ export function setupCurlRoutes(app, options = {}) {
         },
       );
     } catch (error) {
+      logCurlExecutionFailure({
+        requestUrl: requestSpec?.url || null,
+        error,
+      });
       await finishWithCleanup(() =>
         res.status(500).json({
           error: "Execution failed",
-          details: error.message,
         }),
       );
     }
