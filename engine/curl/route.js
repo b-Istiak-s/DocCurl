@@ -175,6 +175,7 @@ export function setupCurlRoutes(app, options = {}) {
           BusboyImpl: options.BusboyImpl,
           mkdtempImpl: options.uploadFsMkdtemp || fs.mkdtemp,
           mkdirImpl: options.uploadFsMkdir || fs.mkdir,
+          chmodImpl: options.uploadFsChmod || fs.chmod,
           rmImpl: options.uploadFsRm || fs.rm,
           createWriteStreamImpl:
             options.uploadFsCreateWriteStream || nodeFs.createWriteStream,
