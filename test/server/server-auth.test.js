@@ -266,7 +266,31 @@ test("login is rate limited after repeated failures and recovers after the locko
   }
 });
 
-test("login rate limiting uses the first trusted forwarded client IP", async () => {
+test("login rate limiter independently evicts stale client state", async () => {
+  const nowRef = { value: 1_000 };
+  const stateStore = new Map();
+  const limiter = createLoginRateLimiter({
+    now: () => nowRef.value,
+    windowMs: 100,
+    lockoutMs: 100,
+    cleanupIntervalMs: 5,
+    stateStore,
+  });
+
+  try {
+    limiter.recordFailure("198.51.100.10");
+    assert.equal(stateStore.size, 1);
+
+    nowRef.value = 1_500;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(stateStore.size, 0);
+  } finally {
+    limiter.dispose();
+  }
+});
+
+test("login rate limiting uses the trusted proxy-resolved client IP", async () => {
   const docsDir = createTempDocs();
 
   try {

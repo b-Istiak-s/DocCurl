@@ -43,7 +43,7 @@ export function createApp({
   app.use(express.json({ limit: "128kb" }));
   app.use(express.static(frontendDir));
 
-  registerAuthRoutes(app, {
+  const disposeAuthRoutes = registerAuthRoutes(app, {
     ...authRouteOptions,
     authEnabled,
     isAuthenticated,
@@ -69,5 +69,11 @@ export function createApp({
     res.sendFile(path.join(frontendDir, "index.html"));
   });
 
-  return { app, authEnabled };
+  return {
+    app,
+    authEnabled,
+    cleanup() {
+      disposeAuthRoutes?.();
+    },
+  };
 }

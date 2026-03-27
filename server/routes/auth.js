@@ -9,32 +9,8 @@ const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 5;
 
-function getTrustedForwardedClientIp(req) {
-  if (!req.app?.get("trust proxy")) {
-    return null;
-  }
-
-  const forwardedFor = req.headers["x-forwarded-for"];
-  const forwardedValue = Array.isArray(forwardedFor)
-    ? forwardedFor.join(",")
-    : forwardedFor;
-  if (typeof forwardedValue !== "string") {
-    return null;
-  }
-
-  return forwardedValue
-    .split(",")
-    .map((value) => value.trim())
-    .find(Boolean) || null;
-}
-
 function getLoginClientKey(req) {
-  return String(
-    getTrustedForwardedClientIp(req) ||
-      req.ip ||
-      req.socket?.remoteAddress ||
-      "unknown",
-  );
+  return String(req.ip || req.socket?.remoteAddress || "unknown");
 }
 
 function trimFailureTimestamps(timestamps, now, windowMs) {
@@ -50,24 +26,41 @@ export function createLoginRateLimiter({
   maxFailures = LOGIN_MAX_FAILURES,
   windowMs = LOGIN_FAILURE_WINDOW_MS,
   lockoutMs = LOGIN_LOCKOUT_MS,
+  cleanupIntervalMs = Math.min(windowMs, lockoutMs),
+  stateStore = new Map(),
 } = {}) {
-  const stateByClientKey = new Map();
+  const stateByClientKey = stateStore;
 
-  function readState(clientKey) {
-    const currentTime = now();
-    const existingState = stateByClientKey.get(clientKey) || {
+  function normalizeState(existingState, currentTime) {
+    const currentState = existingState || {
       blockedUntil: 0,
       failureTimestamps: [],
     };
-    const nextState = {
-      blockedUntil:
-        existingState.blockedUntil > currentTime ? existingState.blockedUntil : 0,
+
+    return {
+      blockedUntil: currentState.blockedUntil > currentTime ? currentState.blockedUntil : 0,
       failureTimestamps: trimFailureTimestamps(
-        existingState.failureTimestamps,
+        currentState.failureTimestamps,
         currentTime,
         windowMs,
       ),
     };
+  }
+
+  function sweepExpiredStates(currentTime = now()) {
+    for (const [clientKey, existingState] of stateByClientKey.entries()) {
+      const nextState = normalizeState(existingState, currentTime);
+      if (nextState.blockedUntil === 0 && nextState.failureTimestamps.length === 0) {
+        stateByClientKey.delete(clientKey);
+        continue;
+      }
+      stateByClientKey.set(clientKey, nextState);
+    }
+  }
+
+  function readState(clientKey) {
+    const currentTime = now();
+    const nextState = normalizeState(stateByClientKey.get(clientKey), currentTime);
 
     if (nextState.blockedUntil === 0 && nextState.failureTimestamps.length === 0) {
       stateByClientKey.delete(clientKey);
@@ -77,6 +70,15 @@ export function createLoginRateLimiter({
     stateByClientKey.set(clientKey, nextState);
     return { now: currentTime, state: nextState };
   }
+
+  const shouldSweep =
+    Number.isFinite(cleanupIntervalMs) && cleanupIntervalMs > 0;
+  const cleanupTimer = shouldSweep
+    ? setInterval(() => {
+        sweepExpiredStates();
+      }, cleanupIntervalMs)
+    : null;
+  cleanupTimer?.unref?.();
 
   return {
     getRetryAfterMs(clientKey) {
@@ -105,6 +107,11 @@ export function createLoginRateLimiter({
     },
     reset(clientKey) {
       stateByClientKey.delete(clientKey);
+    },
+    dispose() {
+      if (cleanupTimer) {
+        clearInterval(cleanupTimer);
+      }
     },
   };
 }
@@ -168,4 +175,8 @@ export function registerAuthRoutes(
     res.setHeader("Set-Cookie", clearSessionCookie());
     res.json({ success: true });
   });
+
+  return () => {
+    loginRateLimiter.dispose?.();
+  };
 }

@@ -50,7 +50,7 @@ export function startServer(port = 3000, projectName, options = {}) {
   const frontendDir = options.frontendDir || path.resolve(__dirname, "../frontend");
   const host = typeof options.host === "string" && options.host ? options.host : undefined;
 
-  const { app, authEnabled } = createApp({
+  const { app, authEnabled, cleanup = () => {} } = createApp({
     docsDir,
     isDev,
     trustProxy,
@@ -72,6 +72,7 @@ export function startServer(port = 3000, projectName, options = {}) {
       `Server is running on http://localhost:${serverPort} (${isDev ? "development" : "production"} mode, ${authLabel})`,
     );
   });
+  server.on("close", cleanup);
 
   return server;
 }
