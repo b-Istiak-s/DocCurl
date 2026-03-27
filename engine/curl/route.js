@@ -98,6 +98,20 @@ function sanitizeLoggedUrl(url) {
   }
 }
 
+function summarizeLoggedExecutionError(error) {
+  if (error && typeof error === "object") {
+    const code =
+      typeof error.code === "string" || typeof error.code === "number"
+        ? String(error.code)
+        : null;
+    if (code) {
+      return `Execution failed (${code})`;
+    }
+  }
+
+  return "Execution failed";
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
@@ -137,17 +151,13 @@ export function setupCurlRoutes(app, options = {}) {
     return runtimePromise;
   }
 
-  function logCurlExecutionFailure({ requestUrl, error, stderr }) {
-    const details = {
+  function logCurlExecutionFailure({ requestUrl, error }) {
+    logger.error?.("Curl execution failed", {
       requestUrl: sanitizeLoggedUrl(requestUrl),
-      error,
-    };
-
-    if (stderr != null && stderr !== "") {
-      details.stderr = String(stderr);
-    }
-
-    logger.error?.("Curl execution failed", details);
+      error: {
+        message: summarizeLoggedExecutionError(error),
+      },
+    });
   }
 
   app.post("/api/run-curl", async (req, res) => {
@@ -276,7 +286,6 @@ export function setupCurlRoutes(app, options = {}) {
             if (error) {
               logCurlExecutionFailure({
                 requestUrl: requestSpec.url,
-                stderr,
                 error,
               });
               return res.status(500).json({

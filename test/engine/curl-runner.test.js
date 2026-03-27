@@ -846,7 +846,10 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
   assert.equal(loggedErrors.length, 1);
   assert.equal(loggedErrors[0].message, "Curl execution failed");
   assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
-  assert.match(loggedErrors[0].details.stderr, /upload failed/i);
+  assert.deepEqual(loggedErrors[0].details.error, {
+    message: "Execution failed",
+  });
+  assert.equal(Object.hasOwn(loggedErrors[0].details, "stderr"), false);
   assert.equal(removals.length, 1);
   assert.deepEqual(removals[0], {
     targetPath: "/tmp/doccurl-upload-failure",
@@ -888,6 +891,9 @@ test("POST /api/run-curl strips credentials and query params from logged request
   assert.equal(loggedErrors.length, 1);
   assert.equal(loggedErrors[0].message, "Curl execution failed");
   assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.deepEqual(loggedErrors[0].details.error, {
+    message: "Execution failed",
+  });
   assert.equal(Object.hasOwn(loggedErrors[0].details, "stderr"), false);
 });
 
