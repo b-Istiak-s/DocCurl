@@ -81,6 +81,23 @@ function formatMultipartError(error, limits = LIMITS) {
   return error.message || "Invalid multipart upload payload";
 }
 
+function sanitizeLoggedUrl(url) {
+  if (typeof url !== "string" || url.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
@@ -118,6 +135,19 @@ export function setupCurlRoutes(app, options = {}) {
       runtimePromise = runtimeResolver();
     }
     return runtimePromise;
+  }
+
+  function logCurlExecutionFailure({ requestUrl, error, stderr }) {
+    const details = {
+      requestUrl: sanitizeLoggedUrl(requestUrl),
+      error,
+    };
+
+    if (stderr != null && stderr !== "") {
+      details.stderr = String(stderr);
+    }
+
+    logger.error?.("Curl execution failed", details);
   }
 
   app.post("/api/run-curl", async (req, res) => {
@@ -244,9 +274,9 @@ export function setupCurlRoutes(app, options = {}) {
         (error, stdout, stderr) => {
           finishWithCleanup(() => {
             if (error) {
-              logger.error?.("Curl execution failed", {
+              logCurlExecutionFailure({
                 requestUrl: requestSpec.url,
-                stderr: String(stderr || ""),
+                stderr,
                 error,
               });
               return res.status(500).json({
@@ -264,7 +294,7 @@ export function setupCurlRoutes(app, options = {}) {
         },
       );
     } catch (error) {
-      logger.error?.("Curl execution failed", {
+      logCurlExecutionFailure({
         requestUrl: requestSpec?.url || null,
         error,
       });

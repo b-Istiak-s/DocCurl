@@ -845,12 +845,50 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
 
   assert.equal(loggedErrors.length, 1);
   assert.equal(loggedErrors[0].message, "Curl execution failed");
+  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
   assert.match(loggedErrors[0].details.stderr, /upload failed/i);
   assert.equal(removals.length, 1);
   assert.deepEqual(removals[0], {
     targetPath: "/tmp/doccurl-upload-failure",
     options: { recursive: true, force: true },
   });
+});
+
+test("POST /api/run-curl strips credentials and query params from logged request URLs", async () => {
+  const loggedErrors = [];
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      logger: {
+        error: (message, details) => loggedErrors.push({ message, details }),
+      },
+      execFileImpl: () => {
+        throw new Error("boom");
+      },
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command:
+            'curl "https://user:secret@api.example.com/upload?token=top-secret&mode=debug#frag"',
+        }),
+      });
+      const data = await response.json();
+      assert.equal(response.status, 500);
+      assert.equal(data.error, "Execution failed");
+    },
+  );
+  if (!started) {
+    return;
+  }
+
+  assert.equal(loggedErrors.length, 1);
+  assert.equal(loggedErrors[0].message, "Curl execution failed");
+  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.equal(Object.hasOwn(loggedErrors[0].details, "stderr"), false);
 });
 
 test("POST /api/run-curl cleans up generated uploads when mount preparation fails", async () => {
