@@ -75,12 +75,18 @@ function escapeHtmlAttribute(value) {
 }
 
 function clearElementChildren(element) {
-  if (typeof element?.replaceChildren === "function") {
+  if (!element) {
+    return;
+  }
+
+  if (typeof element.replaceChildren === "function") {
     element.replaceChildren();
     return;
   }
 
-  element.innerHTML = "";
+  if ("innerHTML" in element) {
+    element.innerHTML = "";
+  }
 }
 
 function renderTextBlock(
