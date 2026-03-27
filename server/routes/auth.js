@@ -123,6 +123,7 @@ export function registerAuthRoutes(
     isAuthenticated,
     configuredPassword,
     sessionSecret,
+    secureSessionCookie = false,
     features = {},
     loginRateLimiter = createLoginRateLimiter(),
     getClientKey = getLoginClientKey,
@@ -167,12 +168,12 @@ export function registerAuthRoutes(
 
     loginRateLimiter.reset(clientKey);
     const sessionToken = createSessionToken(sessionSecret);
-    res.setHeader("Set-Cookie", buildSessionCookie(sessionToken));
+    res.setHeader("Set-Cookie", buildSessionCookie(sessionToken, { secure: secureSessionCookie }));
     return res.json({ success: true, authEnabled: true, authenticated: true });
   });
 
   app.post("/api/auth/logout", (_req, res) => {
-    res.setHeader("Set-Cookie", clearSessionCookie());
+    res.setHeader("Set-Cookie", clearSessionCookie({ secure: secureSessionCookie }));
     res.json({ success: true });
   });
 

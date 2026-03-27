@@ -27,6 +27,7 @@ export function createApp({
   const app = express();
   const markdownRenderer = new MarkdownIt();
   const sessionSecret = crypto.randomBytes(32);
+  const secureSessionCookie = !isDev;
 
   app.set("trust proxy", trustProxy);
 
@@ -49,6 +50,7 @@ export function createApp({
     isAuthenticated,
     configuredPassword,
     sessionSecret,
+    secureSessionCookie,
     features,
   });
 

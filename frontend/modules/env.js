@@ -248,6 +248,13 @@ export function createEnvManager({
     hint.textContent =
       "Add environment variables to replace matching $VARIABLE placeholders before running curl commands.";
 
+    const warning = documentRef.createElement("p");
+    warning.className = "envToolbarWarning";
+    warning.setAttribute("role", "status");
+    warning.setAttribute("aria-live", "polite");
+    warning.textContent =
+      "Warning: values are stored in this browser's localStorage for this site. Avoid long-lived secrets in shared or untrusted browsers.";
+
     const fieldsContainer = documentRef.createElement("div");
     fieldsContainer.className = "envFieldList";
 
@@ -261,7 +268,7 @@ export function createEnvManager({
     addButton.textContent = "Add variable";
 
     actions.append(addButton);
-    body.append(hint, fieldsContainer, actions);
+    body.append(hint, warning, fieldsContainer, actions);
     toolbar.append(header, body);
     toolbar.classList.add("is-collapsed");
 

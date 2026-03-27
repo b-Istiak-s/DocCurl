@@ -70,6 +70,7 @@ Options:
 
 - `-p, --port <port>`: Server port. Default `3000`.
 - `-d, --dir <dir>`: Docs directory. Default `docs`.
+- `--host <host>`: Host interface to bind. Default `127.0.0.1`.
 - `--dev`: Development mode (allows localhost/private targets).
 - `--collapse`: Enables the `Focus Curls` toggle in the docs UI.
 - `--password <password>`: Enables auth. Required in non-dev mode.
@@ -79,6 +80,7 @@ Examples:
 ```bash
 doccurl serve --dev
 doccurl serve -p 8080 -d ./documentation
+doccurl serve --host 0.0.0.0 -p 8080
 doccurl serve --password mySecret123
 ```
 
@@ -124,7 +126,7 @@ curl -X POST $BASE_URL/api/data \\
 ```
 ````
 
-Placeholder variables are discovered from docs and can be managed in the UI. Values are stored in browser `localStorage` under `doccurl.env`.
+Placeholder variables are discovered from docs and can be managed in the UI. Values are stored in browser `localStorage` under `doccurl.env`. Any script running in this origin can read them, so avoid storing long-lived secrets in shared or untrusted browsers.
 
 Edited curl blocks are stored separately in browser `localStorage` under `doccurl.curlEdits.v1`, scoped by document path and curl block ID. Users can reset either the current page’s curl edits or all saved curl edits from the docs UI without affecting env vars.
 

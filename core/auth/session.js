@@ -78,11 +78,11 @@ export function isSessionTokenValid(token, secret, now = Date.now()) {
   return crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
 }
 
-export function buildSessionCookie(token) {
+export function buildSessionCookie(token, { secure = false } = {}) {
   const maxAgeSeconds = Math.floor(SESSION_TTL_MS / 1000);
-  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Max-Age=${maxAgeSeconds}; Path=/; HttpOnly; SameSite=Lax`;
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Max-Age=${maxAgeSeconds}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }
 
-export function clearSessionCookie() {
-  return `${SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`;
+export function clearSessionCookie({ secure = false } = {}) {
+  return `${SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }

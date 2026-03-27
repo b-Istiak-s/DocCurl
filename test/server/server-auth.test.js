@@ -138,6 +138,76 @@ test("production mode requires password", () => {
   }
 });
 
+test("startServer binds to 127.0.0.1 by default and logs the bound host", async () => {
+  const docsDir = createTempDocs();
+  const originalConsoleLog = console.log;
+  const loggedLines = [];
+  let server;
+
+  try {
+    if (!portsChecked) {
+      portsChecked = true;
+      portsBlocked = !(await checkPortBinding());
+      if (portsBlocked && !printedPortWarning) {
+        printedPortWarning = true;
+        console.warn("Skipping socket-based server tests: local port binding is blocked.");
+      }
+    }
+
+    if (portsBlocked) {
+      return;
+    }
+
+    console.log = (...args) => {
+      loggedLines.push(args.join(" "));
+    };
+
+    try {
+      server = startServer(0, docsDir, {
+        dev: true,
+        password: "",
+      });
+    } catch (error) {
+      if (error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const listenResult = await Promise.race([
+      once(server, "listening").then(() => ({ ok: true })),
+      once(server, "error").then(([error]) => ({ error })),
+    ]);
+
+    if (listenResult.error) {
+      if (listenResult.error.code === "EPERM") {
+        portsBlocked = true;
+        if (!printedPortWarning) {
+          printedPortWarning = true;
+          console.warn("Skipping socket-based server tests: local port binding is blocked.");
+        }
+        return;
+      }
+      throw listenResult.error;
+    }
+
+    const addressInfo = server.address();
+    assert.equal(addressInfo.address, "127.0.0.1");
+    assert.equal(loggedLines.some((line) => /http:\/\/127\.0\.0\.1:\d+/.test(line)), true);
+  } finally {
+    console.log = originalConsoleLog;
+    if (server) {
+      await closeServer(server);
+    }
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("protected APIs are blocked until login succeeds", async () => {
   const docsDir = createTempDocs();
   try {
@@ -170,6 +240,9 @@ test("protected APIs are blocked until login succeeds", async () => {
         assert.equal(loginResponse.status, 200);
         const cookieHeader = loginResponse.headers.get("set-cookie");
         assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.match(cookieHeader, /;\s*Secure/i);
         const sessionCookie = cookieHeader.split(";")[0];
         assert.ok(sessionCookie.startsWith("doccurl_session="));
 
@@ -673,6 +746,34 @@ test("development mode stays open when password is not provided", async () => {
 
         const treeResponse = await fetch(`${baseUrl}/api/docs/tree`);
         assert.equal(treeResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("development mode password auth sets a non-secure session cookie", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true, password: "secret123" },
+      async ({ baseUrl }) => {
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "secret123" }),
+        });
+
+        assert.equal(loginResponse.status, 200);
+        const cookieHeader = loginResponse.headers.get("set-cookie");
+        assert.ok(cookieHeader);
+        assert.match(cookieHeader, /;\s*HttpOnly/i);
+        assert.match(cookieHeader, /;\s*SameSite=Lax/i);
+        assert.doesNotMatch(cookieHeader, /;\s*Secure/i);
       },
     );
     if (!started) {
