@@ -73,7 +73,8 @@ Options:
 - `--host <host>`: Host interface to bind. Default `127.0.0.1`.
 - `--dev`: Development mode (allows localhost/private targets).
 - `--collapse`: Enables the `Focus Curls` toggle in the docs UI.
-- `--password`: Prompts for a hidden password. Required in non-dev mode.
+- `--password`: Prompts for a hidden password.
+- `DOCCURL_PASSWORD`: Non-interactive password source for production launches such as PM2 or systemd.
 
 Examples:
 
@@ -82,6 +83,7 @@ doccurl serve --dev
 doccurl serve -p 8080 -d ./documentation
 doccurl serve --host 0.0.0.0 -p 8080
 doccurl serve --password
+DOCCURL_PASSWORD=change-me doccurl serve
 ```
 
 Reverse proxy note:

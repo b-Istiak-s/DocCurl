@@ -721,7 +721,9 @@ test("POST /api/run-curl cleans up upload temp dirs when multipart parser setup 
         isDev: false,
         dnsLookup: async () => [{ address: "8.8.8.8" }],
         uploadFsMkdtemp: async () => uploadTempDir,
-        uploadFsMkdir: async () => {},
+        uploadFsMkdir: async (targetPath, options) => {
+          await fs.mkdir(targetPath, options);
+        },
         uploadFsRm: async (targetPath, options) => {
           removals.push({ targetPath, options });
           await fs.rm(targetPath, options);

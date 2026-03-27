@@ -1,6 +1,6 @@
 {
   "name": "doccurl",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "Interactive curl command documentation viewer with live playground",
   "main": "server/index.js",
   "bin": {

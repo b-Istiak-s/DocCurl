@@ -21,7 +21,7 @@ export function createApp({
 }) {
   const authEnabled = isDev ? configuredPassword.length > 0 : true;
   if (!isDev && configuredPassword.length === 0) {
-    throw new Error("Production mode requires --password");
+    throw new Error("Production mode requires --password or DOCCURL_PASSWORD");
   }
 
   const app = express();
@@ -29,6 +29,7 @@ export function createApp({
   const sessionSecret = crypto.randomBytes(32);
   const secureSessionCookie = !isDev;
 
+  app.disable("x-powered-by");
   app.set("trust proxy", trustProxy);
 
   function isAuthenticated(req) {
@@ -61,7 +62,7 @@ export function createApp({
     ...curlRouteOptions,
   });
 
-  registerDocsRoutes(app, {
+  const disposeDocsRoutes = registerDocsRoutes(app, {
     docsDir,
     markdownRenderer,
     ...docsRouteOptions,
@@ -76,6 +77,7 @@ export function createApp({
     authEnabled,
     cleanup() {
       disposeAuthRoutes?.();
+      disposeDocsRoutes?.();
     },
   };
 }

@@ -131,9 +131,47 @@ test("production mode requires password", () => {
   try {
     assert.throws(
       () => startServer(0, docsDir, { dev: false, password: "" }),
-      /requires --password/i,
+      /requires --password or DOCCURL_PASSWORD/i,
     );
   } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("production mode accepts DOCCURL_PASSWORD for non-interactive launches", async () => {
+  const docsDir = createTempDocs();
+  const originalPassword = process.env.DOCCURL_PASSWORD;
+
+  process.env.DOCCURL_PASSWORD = "env-secret-123";
+
+  try {
+    const started = await withServer(
+      { docsDir, dev: false, password: "" },
+      async ({ baseUrl }) => {
+        const invalidLogin = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "wrong" }),
+        });
+        assert.equal(invalidLogin.status, 401);
+
+        const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: "env-secret-123" }),
+        });
+        assert.equal(loginResponse.status, 200);
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    if (originalPassword === undefined) {
+      delete process.env.DOCCURL_PASSWORD;
+    } else {
+      process.env.DOCCURL_PASSWORD = originalPassword;
+    }
     fs.rmSync(docsDir, { recursive: true, force: true });
   }
 });
@@ -610,6 +648,49 @@ test("path traversal is rejected for docs content endpoint", async () => {
   }
 });
 
+test("docs routes are rate limited before expensive reads", async () => {
+  const docsDir = createTempDocs();
+  let consumeCalls = 0;
+
+  try {
+    const started = await withServer(
+      {
+        docsDir,
+        dev: true,
+        docsRouteOptions: {
+          docsRateLimiter: {
+            consume() {
+              consumeCalls += 1;
+              return consumeCalls === 1
+                ? { allowed: true, retryAfterMs: 0 }
+                : { allowed: false, retryAfterMs: 60_000 };
+            },
+            dispose() {},
+          },
+        },
+      },
+      async ({ baseUrl }) => {
+        const firstResponse = await fetch(`${baseUrl}/api/docs/tree`);
+        assert.equal(firstResponse.status, 200);
+
+        const secondResponse = await fetch(
+          `${baseUrl}/api/docs/content?path=${encodeURIComponent("page.md")}`,
+        );
+        const payload = await secondResponse.json();
+
+        assert.equal(secondResponse.status, 429);
+        assert.equal(secondResponse.headers.get("retry-after"), "60");
+        assert.equal(payload.error, "Too many docs requests. Try again later.");
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
 test("missing docs content returns 404", async () => {
   const docsDir = createTempDocs();
   try {
@@ -623,6 +704,24 @@ test("missing docs content returns 404", async () => {
 
         assert.equal(response.status, 404);
         assert.equal(payload.error, "File not found");
+      },
+    );
+    if (!started) {
+      return;
+    }
+  } finally {
+    fs.rmSync(docsDir, { recursive: true, force: true });
+  }
+});
+
+test("server responses omit the X-Powered-By header", async () => {
+  const docsDir = createTempDocs();
+  try {
+    const started = await withServer(
+      { docsDir, dev: true },
+      async ({ baseUrl }) => {
+        const response = await fetch(`${baseUrl}/api/auth/status`);
+        assert.equal(response.headers.get("x-powered-by"), null);
       },
     );
     if (!started) {

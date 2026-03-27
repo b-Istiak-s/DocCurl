@@ -139,6 +139,7 @@ test("serve command prompts for a password when --password is provided", async (
   assert.deepEqual(receivedCall.options, {
     dev: false,
     collapse: false,
+    host: undefined,
     password: "secret123",
   });
 });

@@ -58,6 +58,16 @@ function formatAddressForLog(address) {
   return address;
 }
 
+function resolveConfiguredPassword(password) {
+  if (typeof password === "string" && password.length > 0) {
+    return password;
+  }
+
+  return typeof process.env.DOCCURL_PASSWORD === "string"
+    ? process.env.DOCCURL_PASSWORD
+    : "";
+}
+
 export function startServer(port = 3000, projectName, options = {}) {
   const envPort = Number.parseInt(process.env.PORT || "", 10);
   const effectivePort = Number.isFinite(port)
@@ -76,8 +86,7 @@ export function startServer(port = 3000, projectName, options = {}) {
     parseTrustProxyValue(options.trustProxy) ??
     parseTrustProxyValue(process.env.TRUST_PROXY) ??
     false;
-  const configuredPassword =
-    typeof options.password === "string" ? options.password : "";
+  const configuredPassword = resolveConfiguredPassword(options.password);
   const frontendDir =
     options.frontendDir || path.resolve(__dirname, "../frontend");
   const host =
