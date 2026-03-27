@@ -37,6 +37,15 @@ function renderFieldTable(title, fields, headingLevel) {
   return lines.join("\n");
 }
 
+function createCodeFence(content) {
+  const backtickRuns = Array.from(String(content || "").matchAll(/`+/g));
+  const longestBacktickRun = backtickRuns.reduce(
+    (maxLength, match) => Math.max(maxLength, match[0].length),
+    0,
+  );
+  return "`".repeat(Math.max(3, longestBacktickRun + 1));
+}
+
 function renderRequestSection(request, { requestHeading, tableHeading }) {
   const sections = [`${requestHeading} ${request.name}`, ""];
 
@@ -55,9 +64,11 @@ function renderRequestSection(request, { requestHeading, tableHeading }) {
     }
   });
 
-  sections.push("```curl");
-  sections.push(formatCurlSpec(request.curlSpec));
-  sections.push("```");
+  const curlSpec = formatCurlSpec(request.curlSpec);
+  const codeFence = createCodeFence(curlSpec);
+  sections.push(`${codeFence}curl`);
+  sections.push(curlSpec);
+  sections.push(codeFence);
   sections.push("");
   return sections.join("\n");
 }
