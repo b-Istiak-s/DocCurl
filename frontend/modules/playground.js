@@ -711,7 +711,7 @@ function renderLoading(outputElement) {
 }
 
 function renderEmpty(outputElement) {
-  outputElement.innerHTML = '<div class="outputEmpty">Run a request to see the response</div>';
+  outputElement.innerHTML = '<div class="outputEmpty">Run a command to see the response</div>';
 }
 
 function normalizeResponseMetadata(metadata) {
@@ -1070,6 +1070,13 @@ export function createPlaygroundSystem({
   }
 
   function buildRunRequest(command, state) {
+    if (state.commandKind === "soccli") {
+      return {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      };
+    }
+
     const resolvedMultipartMetadata = parseCurlMultipartMetadata(command);
     const resolvedSelectedFiles = mapSelectedUploadsToParts(
       state.multipartMetadata.uploadParts,
@@ -1141,10 +1148,12 @@ export function createPlaygroundSystem({
   async function runCurlCommand(requestOptions, state) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
+    const { urlOverride, ...fetchOptions } = requestOptions;
     try {
-      const response = await apiFetch(withBasePath("/api/run-curl"), {
+      const response = await apiFetch(withBasePath(urlOverride || "/api/run-curl"), {
         method: "POST",
-        ...requestOptions,
+        signal: state.activeRunController?.signal,
+        ...fetchOptions,
       });
 
       const data = await parseJsonSafe(response);
@@ -1158,6 +1167,9 @@ export function createPlaygroundSystem({
       const errorText = data.error || "Request failed";
       renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
     } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
       if (error.code === "UNAUTHORIZED") {
         showOutputMessage(
           state.outputElement,
@@ -1167,6 +1179,10 @@ export function createPlaygroundSystem({
         return;
       }
       showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+    } finally {
+      if (!state.activeRunController?.signal?.aborted) {
+        state.activeRunController = null;
+      }
     }
   }
 
@@ -1178,10 +1194,21 @@ export function createPlaygroundSystem({
     if (!requestOptions) {
       return;
     }
-    await runCurlCommand(requestOptions, state);
+    if (state.activeRunController) {
+      state.activeRunController.abort();
+    }
+    state.activeRunController = new AbortController();
+    const runPath = state.commandKind === "soccli" ? "/api/run-soccli" : "/api/run-curl";
+    await runCurlCommand(
+      {
+        ...requestOptions,
+        urlOverride: runPath,
+      },
+      state,
+    );
   }
 
-  function createPlayground(curlCommand, { docPath, blockIndex }) {
+  function createPlayground(curlCommand, { docPath, blockIndex, commandKind = "curl" }) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
     const originalTemplate = formatCurlCommand(curlCommand);
@@ -1199,7 +1226,7 @@ export function createPlaygroundSystem({
             <div class="curlScriptWrapper">
               <div class="curlEditorShell">
                 <pre class="curlOverlay"><code class="language-bash"></code></pre>
-                <textarea class="curlEditor" spellcheck="false" aria-label="Curl request editor"></textarea>
+                <textarea class="curlEditor" spellcheck="false" aria-label="Command editor"></textarea>
               </div>
             </div>
             <div class="panelActions">
@@ -1275,12 +1302,14 @@ export function createPlaygroundSystem({
       runButton,
       fullscreenButton,
       originalTemplate,
+      commandKind,
       multipartMetadata: parseCurlMultipartMetadata(editorElement.value || ""),
       selectedUploadFiles: new Map(),
       isUploadPanelOpen: false,
       uploadValidationMessage: "",
       responseMetadata: null,
       responseMetaTimeoutId: null,
+      activeRunController: null,
       documentRef,
       windowRef,
     };
@@ -1379,14 +1408,21 @@ export function createPlaygroundSystem({
     }
     playgroundStates.clear();
     currentDocPath = docPath;
-    const codeBlocks = docContent.querySelectorAll("pre code.language-curl");
+    const codeBlocks = [
+      ...docContent.querySelectorAll("pre code.language-curl"),
+      ...docContent.querySelectorAll("pre code.language-soccli"),
+    ];
 
     codeBlocks.forEach((block, blockIndex) => {
       const curlCommand = block.textContent.trim();
       const preElement = block.parentElement;
+      const commandKind = block.classList.contains("language-soccli")
+        ? "soccli"
+        : "curl";
       const playground = createPlayground(curlCommand, {
         docPath,
         blockIndex,
+        commandKind,
       });
       preElement.replaceWith(playground);
     });

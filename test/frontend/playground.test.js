@@ -415,10 +415,10 @@ function createNullProtoObject(value) {
   return Object.assign(Object.create(null), value);
 }
 
-function createCurlBlock(command) {
+function createCurlBlock(command, language = "curl") {
   const preElement = new MockElement("pre");
   const codeElement = new MockElement("code");
-  codeElement.className = "language-curl";
+  codeElement.className = `language-${language}`;
   codeElement.textContent = command;
   preElement.appendChild(codeElement);
   return preElement;
@@ -545,6 +545,52 @@ test("copy button uses current env values and current editor text", async () => 
     assert.deepEqual(copyCalls[0].env, {
       BASE_URL: "https://api.example.com",
     });
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("soccli code blocks run against /api/run-soccli", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"));
+    const apiCalls = [];
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async (url, options) => {
+        apiCalls.push({ url, options });
+        return { ok: true };
+      },
+      parseJsonSafe: async () => ({ success: true, output: "connected" }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      localStorageRef: createLocalStorage(),
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+    const runButton = docContent.querySelector(".runBtn");
+    runButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 1);
+    assert.equal(apiCalls[0].url, "/api/run-soccli");
+    assert.match(String(apiCalls[0].options.body), /soccli raw connect/);
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

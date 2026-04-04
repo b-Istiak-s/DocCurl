@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import {
@@ -18,6 +18,7 @@ import { createNoDockerEnsurer, defaultRuntimeResolver } from "./runtime.js";
 import { buildCurlArgs } from "./args.js";
 import { prepareMountedUploads } from "./uploads/files.js";
 import { parseMultipartUploadRequest } from "./uploads/multipart.js";
+import { tokenizeCommand } from "./tokenize.js";
 
 function parseCurlResponseMetadata(stdout) {
   const text = String(stdout ?? "");
@@ -112,6 +113,17 @@ function summarizeLoggedExecutionError(error) {
   return "Execution failed";
 }
 
+function parseSoccliCommand(command) {
+  const tokens = tokenizeCommand(command);
+  if (tokens[0] !== "soccli") {
+    throw new Error('Command must start with "soccli"');
+  }
+  if (tokens.length < 2) {
+    throw new Error("Provide a soccli subcommand");
+  }
+  return tokens.slice(1);
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
@@ -139,6 +151,7 @@ export function setupCurlRoutes(app, options = {}) {
   };
 
   let runtimePromise = null;
+  let activeSoccliRun = null;
 
   async function getContainerRuntime() {
     if (runtimeOverride) {
@@ -314,5 +327,105 @@ export function setupCurlRoutes(app, options = {}) {
         }),
       );
     }
+  });
+
+  app.post("/api/run-soccli", async (req, res) => {
+    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    let soccliArgs;
+    try {
+      soccliArgs = parseSoccliCommand(command);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    let containerRuntime;
+    try {
+      containerRuntime = await getContainerRuntime();
+      await ensureNoDockerMarker(containerRuntime);
+    } catch (error) {
+      return res.status(500).json({ error: "Execution failed" });
+    }
+
+    if (activeSoccliRun?.child && !activeSoccliRun.child.killed) {
+      activeSoccliRun.child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!activeSoccliRun?.child.killed) {
+          activeSoccliRun.child.kill("SIGKILL");
+        }
+      }, 300);
+    }
+
+    const soccliImage = options.soccliImage || "docker.io/billyistiak/soccli:latest";
+    const containerArgs = [
+      "run",
+      "--rm",
+      "--memory=128m",
+      "--cpus=0.5",
+      "--pids-limit=64",
+      "--read-only",
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--network=bridge",
+      "--tmpfs=/tmp:rw,noexec,nosuid,size=16m",
+      "--user=65534:65534",
+      soccliImage,
+      ...soccliArgs,
+    ];
+
+    const child = spawn(containerRuntime, containerArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let output = "";
+    let overflowed = false;
+
+    const appendOutput = (chunk) => {
+      if (overflowed) {
+        return;
+      }
+      output += String(chunk ?? "");
+      if (output.length > LIMITS.maxOutputBytes) {
+        output = output.slice(0, LIMITS.maxOutputBytes);
+        overflowed = true;
+      }
+    };
+
+    child.stdout.on("data", appendOutput);
+    child.stderr.on("data", appendOutput);
+
+    const closeActiveRun = () => {
+      if (activeSoccliRun?.child === child) {
+        activeSoccliRun = null;
+      }
+    };
+
+    activeSoccliRun = { child };
+
+    req.on("close", () => {
+      if (!res.writableEnded && !child.killed) {
+        child.kill("SIGTERM");
+      }
+    });
+
+    child.on("error", () => {
+      closeActiveRun();
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Execution failed" });
+      }
+    });
+
+    child.on("close", (code, signal) => {
+      closeActiveRun();
+      if (res.headersSent) {
+        return;
+      }
+      if (code === 0) {
+        return res.json({ success: true, output });
+      }
+      if (signal === "SIGTERM" || signal === "SIGKILL") {
+        return res.status(409).json({ error: "Previous soccli session replaced by a new run" });
+      }
+      return res.status(500).json({ error: output || "Execution failed" });
+    });
   });
 }
