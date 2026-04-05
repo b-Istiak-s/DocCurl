@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -344,6 +344,56 @@ test("POST /api/run-soccli returns 400 when command is not prefixed with soccli"
   if (!started) {
     test.skip("Socket-based engine tests are skipped in this environment.");
   }
+});
+
+test("POST /api/run-soccli streams container output and runs with -it flags", async () => {
+  const spawnCalls = [];
+  const spawnImpl = (_runtime, args) => {
+    spawnCalls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+    };
+
+    queueMicrotask(() => {
+      child.stdout.emit("data", "connected\n");
+      child.stderr.emit("data", "server-event\n");
+      child.emit("close", 0, null);
+    });
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+      });
+      assert.equal(response.status, 200);
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.match(output, /server-event/);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+
+  assert.equal(spawnCalls.length, 1);
+  assert.ok(spawnCalls[0].includes("-i"));
+  assert.ok(spawnCalls[0].includes("-t"));
 });
 
 test("POST /api/run-curl rejects blocked URL before execution", async () => {

@@ -1190,6 +1190,78 @@ export function createPlaygroundSystem({
     }
   }
 
+  function renderStreamingStart(outputElement) {
+    outputElement.innerHTML = "";
+    const preElement = documentRef.createElement("pre");
+    const codeElement = documentRef.createElement("code");
+    codeElement.className = "language-plaintext";
+    preElement.appendChild(codeElement);
+    outputElement.appendChild(preElement);
+    return codeElement;
+  }
+
+  async function runSoccliCommand(requestOptions, state) {
+    renderLoading(state.outputElement);
+    setResponseMetadata(state, null);
+    const { urlOverride, ...fetchOptions } = requestOptions;
+    try {
+      const response = await apiFetch(withBasePath(urlOverride || "/api/run-soccli"), {
+        method: "POST",
+        signal: state.activeRunController?.signal,
+        ...fetchOptions,
+      });
+
+      if (!response.ok) {
+        const data = await parseJsonSafe(response);
+        const errorText = data.error || "Request failed";
+        renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
+        return;
+      }
+
+      const outputCode = renderStreamingStart(state.outputElement);
+      const responseBody = response.body;
+
+      if (!responseBody?.getReader) {
+        const data = await parseJsonSafe(response);
+        renderResponseOutput(state.outputElement, data.output || "", false);
+        return;
+      }
+
+      const reader = responseBody.getReader();
+      const decoder = new TextDecoder();
+      let received = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        received += decoder.decode(value, { stream: true });
+        outputCode.textContent = received;
+      }
+
+      received += decoder.decode();
+      outputCode.textContent = received;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      if (error.code === "UNAUTHORIZED") {
+        showOutputMessage(
+          state.outputElement,
+          "Error: Unauthorized. Enter password to continue.",
+          true,
+        );
+        return;
+      }
+      showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+    } finally {
+      if (!state.activeRunController?.signal?.aborted) {
+        state.activeRunController = null;
+      }
+    }
+  }
+
   async function handleRunRequest(state) {
     const env = envManager.getCurrentEnv();
     const visibleCommand = state.editorElement.value || "";
@@ -1203,7 +1275,8 @@ export function createPlaygroundSystem({
     }
     state.activeRunController = new AbortController();
     const runPath = state.commandKind === "soccli" ? "/api/run-soccli" : "/api/run-curl";
-    await runCurlCommand(
+    const runRequest = isSoccliState(state) ? runSoccliCommand : runCurlCommand;
+    await runRequest(
       {
         ...requestOptions,
         urlOverride: runPath,

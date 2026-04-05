@@ -39,6 +39,7 @@ export function setupSoccliRoutes(app, options = {}) {
     });
   const runtimeOverride = options.containerRuntime;
   const soccliImage = options.soccliImage || "docker.io/billyistiak/soccli:latest";
+  const spawnImpl = options.spawnImpl || spawn;
 
   let runtimePromise = null;
   let activeSoccliRun = null;
@@ -89,11 +90,13 @@ export function setupSoccliRoutes(app, options = {}) {
 
     stopActiveSoccliRun();
 
-    const child = spawn(
+    const child = spawnImpl(
       containerRuntime,
       [
         "run",
         "--rm",
+        "-i",
+        "-t",
         "--memory=128m",
         "--cpus=0.5",
         "--pids-limit=64",
@@ -113,9 +116,29 @@ export function setupSoccliRoutes(app, options = {}) {
 
     activeSoccliRun = { child };
     const outputCollector = createOutputCollector();
+    let hasOpenedStream = false;
 
-    child.stdout.on("data", (chunk) => outputCollector.append(chunk));
-    child.stderr.on("data", (chunk) => outputCollector.append(chunk));
+    const openStream = () => {
+      if (hasOpenedStream || res.headersSent) {
+        return;
+      }
+      hasOpenedStream = true;
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+    };
+
+    const streamChunk = (chunk) => {
+      outputCollector.append(chunk);
+      openStream();
+      if (!res.writableEnded) {
+        res.write(String(chunk ?? ""));
+      }
+    };
+
+    child.stdout.on("data", streamChunk);
+    child.stderr.on("data", streamChunk);
 
     const closeActiveRun = () => {
       if (activeSoccliRun?.child === child) {
@@ -133,6 +156,11 @@ export function setupSoccliRoutes(app, options = {}) {
       closeActiveRun();
       if (!res.headersSent) {
         res.status(500).json({ error: "Execution failed" });
+        return;
+      }
+      if (!res.writableEnded) {
+        res.write("\n[soccli] Execution failed\n");
+        res.end();
       }
     });
 
@@ -140,6 +168,15 @@ export function setupSoccliRoutes(app, options = {}) {
       closeActiveRun();
 
       if (res.headersSent) {
+        if (!res.writableEnded) {
+          if (signal === "SIGTERM" || signal === "SIGKILL") {
+            res.write("\n[soccli] Session replaced by a new run\n");
+          } else if (code !== 0) {
+            const message = outputCollector.value() || "Execution failed";
+            res.write(`\n[soccli] ${message}\n`);
+          }
+          res.end();
+        }
         return;
       }
 
