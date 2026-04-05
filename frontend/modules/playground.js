@@ -1069,8 +1069,12 @@ export function createPlaygroundSystem({
     syncUploadUI(state);
   }
 
+  function isSoccliState(state) {
+    return state.commandKind === "soccli";
+  }
+
   function buildRunRequest(command, state) {
-    if (state.commandKind === "soccli") {
+    if (isSoccliState(state)) {
       return {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
@@ -1208,19 +1212,22 @@ export function createPlaygroundSystem({
     );
   }
 
-  function createPlayground(curlCommand, { docPath, blockIndex, commandKind = "curl" }) {
+  function createPlayground(commandText, { docPath, blockIndex, commandKind = "curl" }) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
-    const originalTemplate = formatCurlCommand(curlCommand);
-    const blockId = createStableCurlBlockId(docPath, blockIndex, originalTemplate);
+    const originalTemplate = formatCurlCommand(commandText);
+    const blockDocPath = commandKind === "curl" ? docPath : `${docPath}:soccli`;
+    const blockId = createStableCurlBlockId(blockDocPath, blockIndex, originalTemplate);
+    const isSoccli = commandKind === "soccli";
 
     const playground = documentRef.createElement("div");
-    playground.className = "curlPlaygroundInline";
+    playground.className = isSoccli ? "soccliPlaygroundInline" : "curlPlaygroundInline";
     playground.dataset.playgroundId = playgroundId;
     playground.dataset.curlBlockId = blockId;
+    playground.dataset.playgroundKind = commandKind;
     playground.innerHTML = `
       <section class="playgroundPane">
-        <div class="panelHeader">Request</div>
+        <div class="panelHeader">${isSoccli ? "Soccli Command" : "Request"}</div>
         <div class="requestPaneBody">
           <div class="requestEditorView">
             <div class="curlScriptWrapper">
@@ -1252,7 +1259,7 @@ export function createPlaygroundSystem({
         </div>
         <div class="responseMetaToast" role="status" aria-live="polite"></div>
         <div class="curlOutput">
-          <div class="outputEmpty">Run a request to see the response</div>
+          <div class="outputEmpty">Run a command to see the response</div>
         </div>
         <div class="panelActions">
           <button type="button" class="fullscreenBtn">Fullscreen</button>
@@ -1315,6 +1322,15 @@ export function createPlaygroundSystem({
     };
     playgroundStates.set(playgroundId, state);
 
+    if (isSoccli) {
+      uploadToggleButton.hidden = true;
+      uploadPanel.hidden = true;
+      uploadRunButton.hidden = true;
+      uploadHideButton.hidden = true;
+      responseMetaButton.hidden = true;
+      responseMetaToast.hidden = true;
+    }
+
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
     syncUploadUI(state);
@@ -1323,7 +1339,9 @@ export function createPlaygroundSystem({
     editorElement.addEventListener("input", () => {
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
-      syncMultipartState(state);
+      if (!isSoccliState(state)) {
+        syncMultipartState(state);
+      }
       persistEditorValue(state);
     });
 
@@ -1335,7 +1353,9 @@ export function createPlaygroundSystem({
       prettifyTextareaCommand(state);
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
-      syncMultipartState(state);
+      if (!isSoccliState(state)) {
+        syncMultipartState(state);
+      }
       persistEditorValue(state);
     });
 
@@ -1408,24 +1428,38 @@ export function createPlaygroundSystem({
     }
     playgroundStates.clear();
     currentDocPath = docPath;
-    const codeBlocks = [
-      ...docContent.querySelectorAll("pre code.language-curl"),
-      ...docContent.querySelectorAll("pre code.language-soccli"),
-    ];
+    const codeBlocks = [...docContent.querySelectorAll("pre code.language-curl")];
 
     codeBlocks.forEach((block, blockIndex) => {
       const curlCommand = block.textContent.trim();
       const preElement = block.parentElement;
-      const commandKind = block.classList.contains("language-soccli")
-        ? "soccli"
-        : "curl";
       const playground = createPlayground(curlCommand, {
         docPath,
         blockIndex,
-        commandKind,
+        commandKind: "curl",
       });
       preElement.replaceWith(playground);
     });
+  }
+
+  function initializeSoccliPlaygrounds(docPath) {
+    const codeBlocks = [...docContent.querySelectorAll("pre code.language-soccli")];
+
+    codeBlocks.forEach((block, blockIndex) => {
+      const command = block.textContent.trim();
+      const preElement = block.parentElement;
+      const playground = createPlayground(command, {
+        docPath,
+        blockIndex,
+        commandKind: "soccli",
+      });
+      preElement.replaceWith(playground);
+    });
+  }
+
+  function initializeCommandPlaygrounds(docPath) {
+    initializeCurlPlaygrounds(docPath);
+    initializeSoccliPlaygrounds(docPath);
   }
 
   return {
@@ -1433,7 +1467,8 @@ export function createPlaygroundSystem({
     openFullscreen,
     resetCurrentDocument,
     resetAllDocuments,
-    initializeCurlPlaygrounds,
+    initializeCurlPlaygrounds: initializeCommandPlaygrounds,
+    initializeSoccliPlaygrounds,
     hasFullscreenOpen() {
       return Boolean(fullscreenState);
     },

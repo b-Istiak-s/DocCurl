@@ -13,6 +13,7 @@ import {
 
 import {
   setupCurlRoutes,
+  setupSoccliRoutes,
   parseCurlCommand,
   validateTargetUrl,
 } from "../../engine/index.js";
@@ -61,6 +62,10 @@ async function withServer(options, run) {
   const app = express();
   app.use(express.json({ limit: "128kb" }));
   setupCurlRoutes(app, {
+    containerRuntime: "docker",
+    ...options,
+  });
+  setupSoccliRoutes(app, {
     containerRuntime: "docker",
     ...options,
   });
@@ -315,6 +320,29 @@ test("POST /api/run-curl returns 400 for missing payload", async () => {
   );
   if (!started) {
     return;
+  }
+});
+
+test("POST /api/run-soccli returns 400 when command is not prefixed with soccli", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "curl https://example.com" }),
+      });
+      assert.equal(response.status, 400);
+      const payload = await response.json();
+      assert.match(payload.error, /start with \"soccli\"/i);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
   }
 });
 

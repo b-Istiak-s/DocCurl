@@ -346,7 +346,7 @@ function buildPlaygroundMarkup(container) {
   const outputEmpty = createElement(
     "div",
     "outputEmpty",
-    "Run a request to see the response",
+    "Run a command to see the response",
   );
   const responseActions = createElement("div", "panelActions");
   const fullscreenButton = createElement("button", "fullscreenBtn", "Fullscreen");
@@ -584,6 +584,8 @@ test("soccli code blocks run against /api/run-soccli", async () => {
     });
 
     playgroundSystem.initializeCurlPlaygrounds("guide.md");
+    assert.equal(docContent.querySelectorAll(".soccliPlaygroundInline").length, 1);
+    assert.equal(docContent.querySelectorAll(".curlPlaygroundInline").length, 0);
     const runButton = docContent.querySelector(".runBtn");
     runButton.click();
     await flushAsyncWork();
