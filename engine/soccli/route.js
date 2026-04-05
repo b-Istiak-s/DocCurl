@@ -40,8 +40,9 @@ export function setupSoccliRoutes(app, options = {}) {
   const runtimeOverride = options.containerRuntime;
   const soccliImage = options.soccliImage || "docker.io/billyistiak/soccli:latest";
   const spawnImpl = options.spawnImpl || spawn;
-  const soccliSocketTimeoutMs =
-    options.soccliSocketTimeoutMs || options.requestTimeoutMs || LIMITS.requestTimeoutMs;
+  const soccliSocketTimeoutMs = Number.isFinite(options.soccliSocketTimeoutMs)
+    ? options.soccliSocketTimeoutMs
+    : 60_000;
 
   let runtimePromise = null;
   let activeSoccliRun = null;
@@ -142,21 +143,23 @@ export function setupSoccliRoutes(app, options = {}) {
     child.stdout.on("data", streamChunk);
     child.stderr.on("data", streamChunk);
 
-    res.setTimeout(soccliSocketTimeoutMs, () => {
-      if (!child.killed) {
-        child.kill("SIGTERM");
-      }
-
-      if (res.headersSent) {
-        if (!res.writableEnded) {
-          res.write("\n[soccli] Session timed out\n");
-          res.end();
+    if (soccliSocketTimeoutMs !== null && soccliSocketTimeoutMs > 0) {
+      res.setTimeout(soccliSocketTimeoutMs, () => {
+        if (!child.killed) {
+          child.kill("SIGTERM");
         }
-        return;
-      }
 
-      res.status(408).json({ error: "Soccli session timed out" });
-    });
+        if (res.headersSent) {
+          if (!res.writableEnded) {
+            res.write("\n[soccli] Session timed out\n");
+            res.end();
+          }
+          return;
+        }
+
+        res.status(408).json({ error: "Soccli session timed out" });
+      });
+    }
 
     const closeActiveRun = () => {
       if (activeSoccliRun?.child === child) {

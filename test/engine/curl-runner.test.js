@@ -441,6 +441,53 @@ test("POST /api/run-soccli stops streaming when socket times out", async () => {
   assert.equal(killed, true);
 });
 
+test("POST /api/run-soccli does not inherit curl request timeout", async () => {
+  let killed = false;
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      killed = true;
+    };
+
+    setTimeout(() => {
+      child.stdout.emit("data", "connected\n");
+      child.emit("close", 0, null);
+    }, 40);
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+      requestTimeoutMs: 20,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+      });
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.doesNotMatch(output, /Session timed out/);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+
+  assert.equal(killed, false);
+});
+
 test("POST /api/run-curl rejects blocked URL before execution", async () => {
   let called = false;
   const started = await withServer(
