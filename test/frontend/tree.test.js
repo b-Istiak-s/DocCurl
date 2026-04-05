@@ -539,7 +539,7 @@ test("docs tree fallback does not interpret sanitized document HTML as live mark
   }
 });
 
-test("collapsed document view keeps env controls, headings, and curl blocks visible", () => {
+test("collapsed document view keeps env controls, headings, and command blocks visible", () => {
   const container = new MockElement("div");
 
   const actionBar = new MockElement("div");
@@ -564,7 +564,7 @@ test("collapsed document view keeps env controls, headings, and curl blocks visi
   headingTwo.textContent = "Checks";
 
   const secondCurl = new MockElement("div");
-  secondCurl.className = "curlPlaygroundInline";
+  secondCurl.className = "soccliPlaygroundInline";
 
   const closing = new MockElement("p");
   closing.textContent = "Closing";
