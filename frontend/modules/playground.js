@@ -711,7 +711,7 @@ function renderLoading(outputElement) {
 }
 
 function renderEmpty(outputElement) {
-  outputElement.innerHTML = '<div class="outputEmpty">Run a request to see the response</div>';
+  outputElement.innerHTML = '<div class="outputEmpty">Run a command to see the response</div>';
 }
 
 function normalizeResponseMetadata(metadata) {
@@ -1069,7 +1069,18 @@ export function createPlaygroundSystem({
     syncUploadUI(state);
   }
 
+  function isSoccliState(state) {
+    return state.commandKind === "soccli";
+  }
+
   function buildRunRequest(command, state) {
+    if (isSoccliState(state)) {
+      return {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      };
+    }
+
     const resolvedMultipartMetadata = parseCurlMultipartMetadata(command);
     const resolvedSelectedFiles = mapSelectedUploadsToParts(
       state.multipartMetadata.uploadParts,
@@ -1138,13 +1149,15 @@ export function createPlaygroundSystem({
     };
   }
 
-  async function runCurlCommand(requestOptions, state) {
+  async function runCurlCommand(requestOptions, state, runController) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
+    const { urlOverride, ...fetchOptions } = requestOptions;
     try {
-      const response = await apiFetch(withBasePath("/api/run-curl"), {
+      const response = await apiFetch(withBasePath(urlOverride || "/api/run-curl"), {
         method: "POST",
-        ...requestOptions,
+        signal: runController.signal,
+        ...fetchOptions,
       });
 
       const data = await parseJsonSafe(response);
@@ -1158,6 +1171,9 @@ export function createPlaygroundSystem({
       const errorText = data.error || "Request failed";
       renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
     } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
       if (error.code === "UNAUTHORIZED") {
         showOutputMessage(
           state.outputElement,
@@ -1167,6 +1183,82 @@ export function createPlaygroundSystem({
         return;
       }
       showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+    } finally {
+      if (state.activeRunController === runController) {
+        state.activeRunController = null;
+      }
+    }
+  }
+
+  function renderStreamingStart(outputElement) {
+    outputElement.innerHTML = "";
+    const preElement = documentRef.createElement("pre");
+    const codeElement = documentRef.createElement("code");
+    codeElement.className = "language-plaintext";
+    preElement.appendChild(codeElement);
+    outputElement.appendChild(preElement);
+    return codeElement;
+  }
+
+  async function runSoccliCommand(requestOptions, state, runController) {
+    renderLoading(state.outputElement);
+    setResponseMetadata(state, null);
+    const { urlOverride, ...fetchOptions } = requestOptions;
+    try {
+      const response = await apiFetch(withBasePath(urlOverride || "/api/run-soccli"), {
+        method: "POST",
+        signal: runController.signal,
+        ...fetchOptions,
+      });
+
+      if (!response.ok) {
+        const data = await parseJsonSafe(response);
+        const errorText = data.error || "Request failed";
+        renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
+        return;
+      }
+
+      const outputCode = renderStreamingStart(state.outputElement);
+      const responseBody = response.body;
+
+      if (!responseBody?.getReader) {
+        const data = await parseJsonSafe(response);
+        renderResponseOutput(state.outputElement, data.output || "", false);
+        return;
+      }
+
+      const reader = responseBody.getReader();
+      const decoder = new TextDecoder();
+      let received = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        received += decoder.decode(value, { stream: true });
+        outputCode.textContent = received;
+      }
+
+      received += decoder.decode();
+      outputCode.textContent = received;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      if (error.code === "UNAUTHORIZED") {
+        showOutputMessage(
+          state.outputElement,
+          "Error: Unauthorized. Enter password to continue.",
+          true,
+        );
+        return;
+      }
+      showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+    } finally {
+      if (state.activeRunController === runController) {
+        state.activeRunController = null;
+      }
     }
   }
 
@@ -1178,28 +1270,45 @@ export function createPlaygroundSystem({
     if (!requestOptions) {
       return;
     }
-    await runCurlCommand(requestOptions, state);
+    if (state.activeRunController) {
+      state.activeRunController.abort();
+    }
+    const runController = new AbortController();
+    state.activeRunController = runController;
+    const runPath = state.commandKind === "soccli" ? "/api/run-soccli" : "/api/run-curl";
+    const runRequest = isSoccliState(state) ? runSoccliCommand : runCurlCommand;
+    await runRequest(
+      {
+        ...requestOptions,
+        urlOverride: runPath,
+      },
+      state,
+      runController,
+    );
   }
 
-  function createPlayground(curlCommand, { docPath, blockIndex }) {
+  function createPlayground(commandText, { docPath, blockIndex, commandKind = "curl" }) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
-    const originalTemplate = formatCurlCommand(curlCommand);
-    const blockId = createStableCurlBlockId(docPath, blockIndex, originalTemplate);
+    const originalTemplate = formatCurlCommand(commandText);
+    const blockDocPath = commandKind === "curl" ? docPath : `${docPath}:soccli`;
+    const blockId = createStableCurlBlockId(blockDocPath, blockIndex, originalTemplate);
+    const isSoccli = commandKind === "soccli";
 
     const playground = documentRef.createElement("div");
-    playground.className = "curlPlaygroundInline";
+    playground.className = isSoccli ? "soccliPlaygroundInline" : "curlPlaygroundInline";
     playground.dataset.playgroundId = playgroundId;
     playground.dataset.curlBlockId = blockId;
+    playground.dataset.playgroundKind = commandKind;
     playground.innerHTML = `
       <section class="playgroundPane">
-        <div class="panelHeader">Request</div>
+        <div class="panelHeader">${isSoccli ? "Soccli Command" : "Request"}</div>
         <div class="requestPaneBody">
           <div class="requestEditorView">
             <div class="curlScriptWrapper">
               <div class="curlEditorShell">
                 <pre class="curlOverlay"><code class="language-bash"></code></pre>
-                <textarea class="curlEditor" spellcheck="false" aria-label="Curl request editor"></textarea>
+                <textarea class="curlEditor" spellcheck="false" aria-label="Command editor"></textarea>
               </div>
             </div>
             <div class="panelActions">
@@ -1225,7 +1334,7 @@ export function createPlaygroundSystem({
         </div>
         <div class="responseMetaToast" role="status" aria-live="polite"></div>
         <div class="curlOutput">
-          <div class="outputEmpty">Run a request to see the response</div>
+          <div class="outputEmpty">Run a command to see the response</div>
         </div>
         <div class="panelActions">
           <button type="button" class="fullscreenBtn">Fullscreen</button>
@@ -1275,16 +1384,27 @@ export function createPlaygroundSystem({
       runButton,
       fullscreenButton,
       originalTemplate,
+      commandKind,
       multipartMetadata: parseCurlMultipartMetadata(editorElement.value || ""),
       selectedUploadFiles: new Map(),
       isUploadPanelOpen: false,
       uploadValidationMessage: "",
       responseMetadata: null,
       responseMetaTimeoutId: null,
+      activeRunController: null,
       documentRef,
       windowRef,
     };
     playgroundStates.set(playgroundId, state);
+
+    if (isSoccli) {
+      uploadToggleButton.hidden = true;
+      uploadPanel.hidden = true;
+      uploadRunButton.hidden = true;
+      uploadHideButton.hidden = true;
+      responseMetaButton.hidden = true;
+      responseMetaToast.hidden = true;
+    }
 
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
@@ -1294,7 +1414,9 @@ export function createPlaygroundSystem({
     editorElement.addEventListener("input", () => {
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
-      syncMultipartState(state);
+      if (!isSoccliState(state)) {
+        syncMultipartState(state);
+      }
       persistEditorValue(state);
     });
 
@@ -1306,7 +1428,9 @@ export function createPlaygroundSystem({
       prettifyTextareaCommand(state);
       syncCurlOverlay(state, { highlight: true });
       syncCurlOverlayScroll(state);
-      syncMultipartState(state);
+      if (!isSoccliState(state)) {
+        syncMultipartState(state);
+      }
       persistEditorValue(state);
     });
 
@@ -1373,20 +1497,26 @@ export function createPlaygroundSystem({
     }
   }
 
-  function initializeCurlPlaygrounds(docPath) {
+  function initializeCommandPlaygrounds(docPath) {
     for (const state of playgroundStates.values()) {
       hideResponseMetaToast(state);
     }
     playgroundStates.clear();
     currentDocPath = docPath;
-    const codeBlocks = docContent.querySelectorAll("pre code.language-curl");
+    const codeBlocks = [
+      ...docContent.querySelectorAll("pre code.language-curl, pre code.language-soccli"),
+    ];
 
     codeBlocks.forEach((block, blockIndex) => {
-      const curlCommand = block.textContent.trim();
+      const command = block.textContent.trim();
       const preElement = block.parentElement;
-      const playground = createPlayground(curlCommand, {
+      const commandKind = block.classList.contains("language-soccli")
+        ? "soccli"
+        : "curl";
+      const playground = createPlayground(command, {
         docPath,
         blockIndex,
+        commandKind,
       });
       preElement.replaceWith(playground);
     });
@@ -1397,7 +1527,7 @@ export function createPlaygroundSystem({
     openFullscreen,
     resetCurrentDocument,
     resetAllDocuments,
-    initializeCurlPlaygrounds,
+    initializeCurlPlaygrounds: initializeCommandPlaygrounds,
     hasFullscreenOpen() {
       return Boolean(fullscreenState);
     },

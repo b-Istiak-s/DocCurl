@@ -1,3 +1,4 @@
+export { setupSoccliRoutes } from "./soccli/route.js";
 export { setupCurlRoutes } from "./curl/route.js";
 export { tokenizeCommand } from "./curl/tokenize.js";
 export { parseCurlCommand, parseLegacyRequest, resolveRequestSpec } from "./curl/parse.js";
