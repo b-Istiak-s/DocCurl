@@ -17,6 +17,7 @@ import {
   parseCurlCommand,
   validateTargetUrl,
 } from "../../engine/index.js";
+import { parseSoccliCommand } from "../../engine/soccli/command.js";
 
 let portsBlocked = false;
 let portsChecked = false;
@@ -274,6 +275,18 @@ test("parseCurlCommand rejects unsupported flags", () => {
   );
 });
 
+test("parseSoccliCommand normalizes validation and tokenizer errors", () => {
+  assert.throws(() => parseSoccliCommand(""), /soccli: invalid command/i);
+  assert.throws(
+    () => parseSoccliCommand("curl https://example.com"),
+    /soccli: command must start with "soccli"/i,
+  );
+  assert.throws(
+    () => parseSoccliCommand('soccli raw "unterminated'),
+    /soccli: tokenizer error - unterminated quote/i,
+  );
+});
+
 test("validateTargetUrl blocks localhost and private targets in production", async () => {
   const blockedUrls = [
     "http://localhost:3000",
@@ -414,6 +427,64 @@ test("POST /api/run-soccli streams container output and runs with -it flags", as
   assert.ok(spawnCalls[0].includes("-t"));
 });
 
+test("POST /api/run-soccli does not cancel healthy runs on normal request close", async () => {
+  const killSignals = [];
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let closed = false;
+    child.kill = (signal = "SIGTERM") => {
+      killSignals.push(signal);
+      if (closed) {
+        return true;
+      }
+      closed = true;
+      queueMicrotask(() => {
+        child.emit("close", null, signal);
+      });
+      return true;
+    };
+
+    setTimeout(() => {
+      if (closed) {
+        return;
+      }
+      child.stdout.emit("data", "connected\n");
+      closed = true;
+      child.emit("close", 0, null);
+    }, 25);
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
+      });
+      assert.equal(response.status, 200);
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.deepEqual(killSignals, []);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+});
+
 test("POST /api/run-soccli stops streaming when socket times out", async () => {
   let killed = false;
   const spawnImpl = () => {
@@ -459,6 +530,52 @@ test("POST /api/run-soccli stops streaming when socket times out", async () => {
   }
 
   assert.equal(killed, true);
+});
+
+test("POST /api/run-soccli reports timeout instead of replacement when timeout kills child", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let closed = false;
+    child.kill = (signal = "SIGTERM") => {
+      if (closed) {
+        return true;
+      }
+      closed = true;
+      queueMicrotask(() => {
+        child.emit("close", null, signal);
+      });
+      return true;
+    };
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+      soccliSocketTimeoutMs: 20,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
+      });
+      const payload = await response.json();
+      assert.equal(response.status, 408);
+      assert.match(payload.error, /timed out/i);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
 });
 
 test("POST /api/run-soccli does not inherit curl request timeout", async () => {

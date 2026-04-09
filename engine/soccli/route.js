@@ -229,6 +229,11 @@ export function setupSoccliRoutes(app, options = {}) {
       return;
     }
 
+    if (typeof activeRun.terminate === "function") {
+      await activeRun.terminate("replaced");
+      return;
+    }
+
     await terminateChildWithDeadline(activeRun.child, {
       sigtermDelayMs: 0,
       sigkillDelayMs: 300,
@@ -306,9 +311,29 @@ export function setupSoccliRoutes(app, options = {}) {
       },
     );
 
-    activeSoccliRuns.set(scopeKey, { child });
     const outputCollector = createOutputCollector();
     let hasOpenedStream = false;
+    let terminationReason = null;
+    let terminationPromise = null;
+
+    const markTerminationReason = (reason) => {
+      if (!terminationReason) {
+        terminationReason = reason;
+      }
+    };
+
+    const terminateRun = (reason) => {
+      markTerminationReason(reason);
+      if (!terminationPromise) {
+        terminationPromise = terminateChildWithDeadline(child, {
+          sigtermDelayMs: 0,
+          sigkillDelayMs: 300,
+        });
+      }
+      return terminationPromise;
+    };
+
+    activeSoccliRuns.set(scopeKey, { child, terminate: terminateRun });
 
     const openStream = () => {
       if (hasOpenedStream || res.headersSent) {
@@ -333,10 +358,7 @@ export function setupSoccliRoutes(app, options = {}) {
     child.stderr.on("data", streamChunk);
 
     const timeoutHandle = setTimeout(async () => {
-      await terminateChildWithDeadline(child, {
-        sigtermDelayMs: 0,
-        sigkillDelayMs: 300,
-      });
+      await terminateRun("timeout");
 
       if (res.headersSent) {
         if (!res.writableEnded) {
@@ -349,6 +371,13 @@ export function setupSoccliRoutes(app, options = {}) {
       res.status(408).json({ error: "Soccli session timed out" });
     }, soccliSocketTimeoutMs);
 
+    const handleClientDisconnect = () => {
+      if (res.writableEnded) {
+        return;
+      }
+      void terminateRun("disconnect");
+    };
+
     const closeActiveRun = () => {
       clearTimeout(timeoutHandle);
       if (activeSoccliRuns.get(scopeKey)?.child === child) {
@@ -356,16 +385,8 @@ export function setupSoccliRoutes(app, options = {}) {
       }
     };
 
-    req.on("close", async () => {
-      if (res.writableEnded) {
-        return;
-      }
-
-      await terminateChildWithDeadline(child, {
-        sigtermDelayMs: 0,
-        sigkillDelayMs: 300,
-      });
-    });
+    req.once("aborted", handleClientDisconnect);
+    res.once("close", handleClientDisconnect);
 
     child.on("error", () => {
       closeActiveRun();
@@ -382,11 +403,18 @@ export function setupSoccliRoutes(app, options = {}) {
     child.on("close", (code, signal) => {
       closeActiveRun();
 
+      if (
+        terminationReason === "disconnect" ||
+        terminationReason === "timeout"
+      ) {
+        return;
+      }
+
       if (res.headersSent) {
         if (!res.writableEnded) {
-          if (signal === "SIGTERM" || signal === "SIGKILL") {
+          if (terminationReason === "replaced") {
             res.write("\n[soccli] Session replaced by a new run\n");
-          } else if (code !== 0) {
+          } else if (code !== 0 || signal) {
             const message = outputCollector.value() || "Execution failed";
             res.write(`\n[soccli] ${message}\n`);
           }
@@ -399,7 +427,7 @@ export function setupSoccliRoutes(app, options = {}) {
         return res.json({ success: true, output: outputCollector.value() });
       }
 
-      if (signal === "SIGTERM" || signal === "SIGKILL") {
+      if (terminationReason === "replaced") {
         return res
           .status(409)
           .json({ error: "Previous soccli session replaced by a new run" });
