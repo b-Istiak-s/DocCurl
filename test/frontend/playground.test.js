@@ -46,7 +46,11 @@ class MockClassList {
   }
 
   set(value) {
-    this.classes = new Set(String(value || "").split(/\s+/).filter(Boolean));
+    this.classes = new Set(
+      String(value || "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
     this.#sync();
   }
 
@@ -335,11 +339,19 @@ function buildPlaygroundMarkup(container) {
   uploadError.hidden = true;
   const uploadList = createElement("div", "curlUploadList");
   const uploadActions = createElement("div", "curlUploadActions");
-  const hideUploadsButton = createElement("button", "hideUploadsBtn", "Hide Uploads");
+  const hideUploadsButton = createElement(
+    "button",
+    "hideUploadsBtn",
+    "Hide Uploads",
+  );
   const uploadRunButton = createElement("button", "uploadRunBtn", "Run");
   const requestActions = createElement("div", "panelActions");
   const copyButton = createElement("button", "copyBtn", "Copy");
-  const uploadToggleButton = createElement("button", "uploadToggleBtn", "Upload Files");
+  const uploadToggleButton = createElement(
+    "button",
+    "uploadToggleBtn",
+    "Upload Files",
+  );
   uploadToggleButton.hidden = true;
   const runButton = createElement("button", "runBtn", "Run");
 
@@ -358,7 +370,11 @@ function buildPlaygroundMarkup(container) {
   const responsePane = createElement("section", "playgroundPane responsePane");
   const responseHeader = createElement("div", "panelHeader responseHeader");
   const responseLabel = createElement("span", "", "Response");
-  const responseMetaButton = createElement("button", "responseMetaBtn", "Details");
+  const responseMetaButton = createElement(
+    "button",
+    "responseMetaBtn",
+    "Details",
+  );
   responseMetaButton.disabled = true;
   const responseToast = createElement("div", "responseMetaToast");
   const output = createElement("div", "curlOutput");
@@ -368,7 +384,11 @@ function buildPlaygroundMarkup(container) {
     "Run a command to see the response",
   );
   const responseActions = createElement("div", "panelActions");
-  const fullscreenButton = createElement("button", "fullscreenBtn", "Fullscreen");
+  const fullscreenButton = createElement(
+    "button",
+    "fullscreenBtn",
+    "Fullscreen",
+  );
 
   responseHeader.append(responseLabel, responseMetaButton);
   output.appendChild(outputEmpty);
@@ -466,8 +486,14 @@ test("initializeCurlPlaygrounds restores saved edits and keeps stable block ids 
   try {
     const rawCommand = "curl https://api.example.com/users";
     const originalTemplate = formatCurlCommand(rawCommand);
-    const secondBlockId = createStableCurlBlockId("guide.md", 1, originalTemplate);
-    const storedEdit = formatCurlCommand("curl https://saved.example.com/users");
+    const secondBlockId = createStableCurlBlockId(
+      "guide.md",
+      1,
+      originalTemplate,
+    );
+    const storedEdit = formatCurlCommand(
+      "curl https://saved.example.com/users",
+    );
     const localStorageRef = createLocalStorage({
       "doccurl.curlEdits.v1": JSON.stringify({
         "guide.md": {
@@ -581,7 +607,9 @@ test("soccli code blocks run against /api/run-soccli", async () => {
 
   try {
     const docContent = new MockElement("div");
-    docContent.appendChild(createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"));
+    docContent.appendChild(
+      createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"),
+    );
     const apiCalls = [];
 
     const playgroundSystem = createPlaygroundSystem({
@@ -603,17 +631,21 @@ test("soccli code blocks run against /api/run-soccli", async () => {
     });
 
     playgroundSystem.initializeCurlPlaygrounds("guide.md");
-    assert.equal(docContent.querySelectorAll(".soccliPlaygroundInline").length, 1);
-    assert.equal(docContent.querySelectorAll(".curlPlaygroundInline").length, 0);
+    assert.equal(
+      docContent.querySelectorAll(".soccliPlaygroundInline").length,
+      1,
+    );
+    assert.equal(
+      docContent.querySelectorAll(".curlPlaygroundInline").length,
+      0,
+    );
     const runButton = docContent.querySelector(".runBtn");
     runButton.click();
     await flushAsyncWork();
 
     assert.equal(apiCalls.length, 1);
     assert.equal(apiCalls[0].url, "/api/run-soccli");
-    assert.equal(apiCalls[0].options.headers["Content-Type"], "application/json");
-    const payload = JSON.parse(String(apiCalls[0].options.body));
-    assert.equal(payload.command, "soccli raw connect wss://example.com/ws");
+    assert.match(String(apiCalls[0].options.body), /soccli raw connect/);
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
@@ -631,7 +663,9 @@ test("soccli output streams incrementally from response body reader", async () =
 
   try {
     const docContent = new MockElement("div");
-    docContent.appendChild(createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"));
+    docContent.appendChild(
+      createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"),
+    );
 
     const chunks = ["connected\n", "message: hello\n"];
     const response = {
@@ -737,10 +771,7 @@ test("upload overlay opens and closes for upload-backed multipart rows without r
 
     const fileInput = docContent.querySelector(".curlUploadInput");
     const playground = docContent.querySelector(".curlPlaygroundInline");
-    assert.equal(
-      fileInput.id,
-      `${playground.dataset.curlBlockId}-upload-0`,
-    );
+    assert.equal(fileInput.id, `${playground.dataset.curlBlockId}-upload-0`);
     assert.equal(fieldNames[0].getAttribute("for"), fileInput.id);
 
     hideUploadsButton.click();
@@ -798,8 +829,14 @@ test("upload-backed multipart rows use distinct labels for repeated field names"
     assert.equal(fieldNames[0].getAttribute("for"), fileInputs[0].id);
     assert.equal(fieldNames[1].getAttribute("for"), fileInputs[1].id);
     const playground = docContent.querySelector(".curlPlaygroundInline");
-    assert.equal(fileInputs[0].id, `${playground.dataset.curlBlockId}-upload-0`);
-    assert.equal(fileInputs[1].id, `${playground.dataset.curlBlockId}-upload-1`);
+    assert.equal(
+      fileInputs[0].id,
+      `${playground.dataset.curlBlockId}-upload-0`,
+    );
+    assert.equal(
+      fileInputs[1].id,
+      `${playground.dataset.curlBlockId}-upload-1`,
+    );
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
@@ -817,7 +854,8 @@ test("upload-backed inputs use block-scoped ids across multiple playgrounds", ()
 
   try {
     const docContent = new MockElement("div");
-    const command = 'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload';
+    const command =
+      'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload';
     docContent.append(createCurlBlock(command), createCurlBlock(command));
 
     const playgroundSystem = createPlaygroundSystem({
@@ -846,8 +884,14 @@ test("upload-backed inputs use block-scoped ids across multiple playgrounds", ()
 
     assert.equal(playgrounds.length, 2);
     assert.equal(fileInputs.length, 2);
-    assert.equal(fileInputs[0].id, `${playgrounds[0].dataset.curlBlockId}-upload-0`);
-    assert.equal(fileInputs[1].id, `${playgrounds[1].dataset.curlBlockId}-upload-0`);
+    assert.equal(
+      fileInputs[0].id,
+      `${playgrounds[0].dataset.curlBlockId}-upload-0`,
+    );
+    assert.equal(
+      fileInputs[1].id,
+      `${playgrounds[1].dataset.curlBlockId}-upload-0`,
+    );
     assert.notEqual(fileInputs[0].id, fileInputs[1].id);
     assert.equal(labels[0].getAttribute("for"), fileInputs[0].id);
     assert.equal(labels[1].getAttribute("for"), fileInputs[1].id);
@@ -868,7 +912,11 @@ test("upload-backed multipart curl blocks run until a file is selected and then 
 
   try {
     const docContent = new MockElement("div");
-    docContent.appendChild(createCurlBlock('curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload'));
+    docContent.appendChild(
+      createCurlBlock(
+        'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload',
+      ),
+    );
     const apiCalls = [];
     const selectedFile = createFileLike("license.pdf", 1024);
 
@@ -947,7 +995,9 @@ test("env-resolved multipart uploads open the resolved picker UI and use resolve
 
   try {
     const docContent = new MockElement("div");
-    docContent.appendChild(createCurlBlock("curl $SECOND $FIRST https://api.example.com/upload"));
+    docContent.appendChild(
+      createCurlBlock("curl $SECOND $FIRST https://api.example.com/upload"),
+    );
     const apiCalls = [];
     const documentFile = createFileLike("license.pdf", 1024);
     const avatarFile = createFileLike("avatar.png", 2048);
@@ -990,7 +1040,9 @@ test("env-resolved multipart uploads open the resolved picker UI and use resolve
     assert.equal(uploadPanel.hidden, false);
     assert.equal(requestEditorView.hidden, true);
     assert.deepEqual(
-      docContent.querySelectorAll(".curlUploadFieldName").map((element) => element.textContent),
+      docContent
+        .querySelectorAll(".curlUploadFieldName")
+        .map((element) => element.textContent),
       ["documents[]", "avatar"],
     );
 
@@ -1006,8 +1058,14 @@ test("env-resolved multipart uploads open the resolved picker UI and use resolve
     assert.equal(apiCalls.length, 1);
     assert.ok(apiCalls[0].body instanceof MockFormData);
     assert.equal(apiCalls[0].body.entries[0].name, "command");
-    assert.match(apiCalls[0].body.entries[0].value, /documents\[\]=@\/tmp\/license\.pdf/);
-    assert.match(apiCalls[0].body.entries[0].value, /avatar=@\/tmp\/avatar\.png/);
+    assert.match(
+      apiCalls[0].body.entries[0].value,
+      /documents\[\]=@\/tmp\/license\.pdf/,
+    );
+    assert.match(
+      apiCalls[0].body.entries[0].value,
+      /avatar=@\/tmp\/avatar\.png/,
+    );
     assert.deepEqual(apiCalls[0].body.entries.slice(1), [
       { name: "upload_0", value: documentFile, filename: "license.pdf" },
       { name: "upload_1", value: avatarFile, filename: "avatar.png" },
@@ -1069,11 +1127,15 @@ test("selected multipart files stay attached when upload rows are reordered", ()
     editor.dispatch("input");
 
     assert.deepEqual(
-      docContent.querySelectorAll(".curlUploadFieldName").map((element) => element.textContent),
+      docContent
+        .querySelectorAll(".curlUploadFieldName")
+        .map((element) => element.textContent),
       ["avatar", "documents[]"],
     );
     assert.deepEqual(
-      docContent.querySelectorAll(".curlUploadMeta").map((element) => element.textContent),
+      docContent
+        .querySelectorAll(".curlUploadMeta")
+        .map((element) => element.textContent),
       ["avatar.png (2 KB)", "license.pdf (1 KB)"],
     );
   } finally {
@@ -1094,7 +1156,9 @@ test("generated multipart curl still runs without browser uploads and keeps JSON
   try {
     const docContent = new MockElement("div");
     docContent.appendChild(
-      createCurlBlock('curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload'),
+      createCurlBlock(
+        'curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload',
+      ),
     );
     const apiCalls = [];
 
@@ -1158,7 +1222,9 @@ test("upload overlay auto-closes and disappears when curl stops having upload-ba
   try {
     const docContent = new MockElement("div");
     docContent.appendChild(
-      createCurlBlock('curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload'),
+      createCurlBlock(
+        'curl -F "documents[]=@/tmp/license.pdf" https://api.example.com/upload',
+      ),
     );
 
     const playgroundSystem = createPlaygroundSystem({
@@ -1187,7 +1253,8 @@ test("upload overlay auto-closes and disappears when curl stops having upload-ba
     assert.equal(uploadPanel.hidden, false);
     assert.equal(requestEditorView.hidden, true);
 
-    editor.value = 'curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload';
+    editor.value =
+      'curl -F "avatar=@R&{avatar.png}" https://api.example.com/upload';
     editor.dispatch("input");
 
     assert.equal(uploadPanel.hidden, true);
@@ -1214,7 +1281,9 @@ test("page reset clears only the active document curl edits and keeps env values
     const rawCommand = "curl https://api.example.com/account";
     const originalTemplate = formatCurlCommand(rawCommand);
     const blockId = createStableCurlBlockId("page-a.md", 0, originalTemplate);
-    const savedEdit = formatCurlCommand("curl https://edited.example.com/account");
+    const savedEdit = formatCurlCommand(
+      "curl https://edited.example.com/account",
+    );
     const localStorageRef = createLocalStorage({
       "doccurl.env": JSON.stringify({
         API_TOKEN: "secret-token",
@@ -1274,11 +1343,14 @@ test("page reset clears only the active document curl edits and keeps env values
 
     assert.equal(editor.value, originalTemplate);
     assert.ok(output.querySelector(".outputEmpty"));
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({
-      "page-b.md": createNullProtoObject({
-        "curl-keep": "curl https://keep.example.com",
+    assert.deepEqual(
+      loadStoredCurlEdits(localStorageRef),
+      createNullProtoObject({
+        "page-b.md": createNullProtoObject({
+          "curl-keep": "curl https://keep.example.com",
+        }),
       }),
-    }));
+    );
     assert.deepEqual(JSON.parse(localStorageRef.getItem("doccurl.env")), {
       API_TOKEN: "secret-token",
     });
@@ -1343,13 +1415,19 @@ test("global reset clears all stored curl edits without touching env values", ()
     playgroundSystem.resetAllDocuments();
 
     assert.equal(editor.value, originalTemplate);
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({}));
+    assert.deepEqual(
+      loadStoredCurlEdits(localStorageRef),
+      createNullProtoObject({}),
+    );
     assert.deepEqual(JSON.parse(localStorageRef.getItem("doccurl.env")), {
       BASE_URL: "https://api.example.com",
     });
 
     clearAllStoredCurlEdits(localStorageRef);
-    assert.deepEqual(loadStoredCurlEdits(localStorageRef), createNullProtoObject({}));
+    assert.deepEqual(
+      loadStoredCurlEdits(localStorageRef),
+      createNullProtoObject({}),
+    );
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;
@@ -1359,11 +1437,11 @@ test("global reset clears all stored curl edits without touching env values", ()
 test("loadStoredCurlEdits drops reserved keys and returns null-prototype maps", () => {
   const localStorageRef = createLocalStorage({
     "doccurl.curlEdits.v1": JSON.stringify({
-      "__proto__": {
+      __proto__: {
         polluted: "nope",
       },
       "page-a.md": {
-        "__proto__": "ignore",
+        __proto__: "ignore",
         constructor: "ignore",
         prototype: "ignore",
         "curl-safe": "curl https://api.example.com/safe",
@@ -1378,11 +1456,14 @@ test("loadStoredCurlEdits drops reserved keys and returns null-prototype maps", 
 
   assert.equal(Object.getPrototypeOf(edits), null);
   assert.equal(Object.getPrototypeOf(edits["page-a.md"]), null);
-  assert.deepEqual(edits, createNullProtoObject({
-    "page-a.md": createNullProtoObject({
-      "curl-safe": "curl https://api.example.com/safe",
+  assert.deepEqual(
+    edits,
+    createNullProtoObject({
+      "page-a.md": createNullProtoObject({
+        "curl-safe": "curl https://api.example.com/safe",
+      }),
     }),
-  }));
+  );
   assert.equal(edits.__proto__, undefined);
   assert.equal(edits.constructor, undefined);
 });

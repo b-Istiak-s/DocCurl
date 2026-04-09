@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { LIMITS, NODOCKER_MARKER_PATH } from "../curl/constants.js";
-import { createNoDockerEnsurer, defaultRuntimeResolver } from "../curl/runtime.js";
+import {
+  createNoDockerEnsurer,
+  defaultRuntimeResolver,
+} from "../curl/runtime.js";
 import {
   defaultDnsLookup,
   isLocalDevTarget,
@@ -74,12 +77,14 @@ function extractSoccliTargetUrl(soccliArgs) {
   const pathIndex = soccliArgs.indexOf("--path");
   const secure = soccliArgs.includes("--secure");
   const protocol = secure ? "https" : "http";
-  const port = portIndex !== -1 && soccliArgs[portIndex + 1]
-    ? `:${soccliArgs[portIndex + 1]}`
-    : "";
-  const path = pathIndex !== -1 && soccliArgs[pathIndex + 1]
-    ? soccliArgs[pathIndex + 1]
-    : "/";
+  const port =
+    portIndex !== -1 && soccliArgs[portIndex + 1]
+      ? `:${soccliArgs[portIndex + 1]}`
+      : "";
+  const path =
+    pathIndex !== -1 && soccliArgs[pathIndex + 1]
+      ? soccliArgs[pathIndex + 1]
+      : "/";
 
   return `${protocol}://${host}${port}${path}`;
 }
@@ -91,9 +96,8 @@ function resolveRunScopeKey(req) {
     return `scope:${explicitRunScope}`;
   }
 
-  const cookieHeader = typeof req.headers?.cookie === "string"
-    ? req.headers.cookie.trim()
-    : "";
+  const cookieHeader =
+    typeof req.headers?.cookie === "string" ? req.headers.cookie.trim() : "";
   if (cookieHeader) {
     return `cookie:${cookieHeader}`;
   }
@@ -103,10 +107,7 @@ function resolveRunScopeKey(req) {
 
 function terminateChildWithDeadline(
   child,
-  {
-    sigtermDelayMs = 0,
-    sigkillDelayMs = 300,
-  } = {},
+  { sigtermDelayMs = 0, sigkillDelayMs = 300 } = {},
 ) {
   if (!child) {
     return Promise.resolve();
@@ -197,10 +198,13 @@ export function setupSoccliRoutes(app, options = {}) {
       logger,
     });
   const runtimeOverride = options.containerRuntime;
-  const soccliImage = options.soccliImage || "docker.io/billyistiak/soccli:latest";
+  const soccliImage =
+    options.soccliImage || "docker.io/billyistiak/soccli:latest";
   const spawnImpl = options.spawnImpl || spawn;
   const soccliSocketTimeoutMs =
-    options.soccliSocketTimeoutMs || options.requestTimeoutMs || LIMITS.requestTimeoutMs;
+    options.soccliSocketTimeoutMs ||
+    options.requestTimeoutMs ||
+    LIMITS.requestTimeoutMs;
   const isDev = Boolean(options.isDev);
   const dnsLookup = options.dnsLookup || defaultDnsLookup;
 
@@ -232,7 +236,8 @@ export function setupSoccliRoutes(app, options = {}) {
   }
 
   app.post("/api/run-soccli", async (req, res) => {
-    const command = typeof req.body?.command === "string" ? req.body.command : "";
+    const command =
+      typeof req.body?.command === "string" ? req.body.command : "";
     const scopeKey = resolveRunScopeKey(req);
 
     let soccliArgs;
@@ -244,12 +249,16 @@ export function setupSoccliRoutes(app, options = {}) {
 
     const protocolCommand = soccliArgs[0];
     if (!ALLOWED_SOCCLI_PROTOCOLS.has(protocolCommand)) {
-      return res.status(400).json({ error: `Unsupported soccli protocol: ${protocolCommand}` });
+      return res
+        .status(400)
+        .json({ error: `Unsupported soccli protocol: ${protocolCommand}` });
     }
 
     const targetUrl = extractSoccliTargetUrl(soccliArgs);
     if (!targetUrl) {
-      return res.status(400).json({ error: "Soccli command must include a destination URL/host" });
+      return res
+        .status(400)
+        .json({ error: "Soccli command must include a destination URL/host" });
     }
 
     const urlError = await validateTargetUrl(targetUrl, {
