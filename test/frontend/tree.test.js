@@ -539,6 +539,80 @@ test("docs tree fallback does not interpret sanitized document HTML as live mark
   }
 });
 
+test("docs tree action bar detects inline playgrounds with mock selector shim", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = createDocument();
+  global.window = {
+    matchMedia: () => ({ matches: false }),
+  };
+
+  const docList = new MockElement("div");
+  const docContent = new MockElement("div");
+  let resetCount = 0;
+
+  const treeResponse = createResponse(true, {
+    tree: [{ type: "file", name: "page.md", path: "page.md" }],
+  });
+
+  const treeSystem = createDocsTreeSystem({
+    docList,
+    docContent,
+    apiFetch: async (url) => {
+      if (String(url).includes("/api/docs/tree")) {
+        return treeResponse;
+      }
+      return createResponse(true, {
+        html: "<p>Loaded</p>",
+        markdown: "Loaded",
+      });
+    },
+    parseJsonSafe: async (response) => response.data,
+    withBasePath: (value) => value,
+    envManager: {
+      collectPlaceholderNamesFromDocument: () => [],
+      createEnvToolbar: () => new MockElement("div"),
+    },
+    playgroundSystem: {
+      hasFullscreenOpen: () => false,
+      closeFullscreen() {},
+      resetCurrentDocument() {
+        resetCount += 1;
+      },
+      initializeCurlPlaygrounds() {
+        const block = new MockElement("div");
+        block.className = "soccliPlaygroundInline";
+        docContent.appendChild(block);
+      },
+    },
+    exportSystem: null,
+    closeSidebar() {},
+    getFeatures: () => ({ contentCollapse: true }),
+  });
+
+  try {
+    await treeSystem.loadDocsTree();
+
+    const actionButtons = docContent.querySelectorAll(".docActionButton");
+    const resetButton = actionButtons.find(
+      (button) => button.textContent === "Reset Page",
+    );
+    const focusButton = actionButtons.find(
+      (button) => button.textContent === "Focus Curls",
+    );
+
+    assert.equal(resetButton?.disabled, false);
+    assert.equal(focusButton?.disabled, false);
+
+    resetButton.click();
+    assert.equal(resetCount, 1);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
 test("collapsed document view keeps env controls, headings, and command blocks visible", () => {
   const container = new MockElement("div");
 
