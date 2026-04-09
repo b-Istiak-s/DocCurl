@@ -346,7 +346,7 @@ function buildPlaygroundMarkup(container) {
   const outputEmpty = createElement(
     "div",
     "outputEmpty",
-    "Run a request to see the response",
+    "Run a command to see the response",
   );
   const responseActions = createElement("div", "panelActions");
   const fullscreenButton = createElement("button", "fullscreenBtn", "Fullscreen");
@@ -415,10 +415,10 @@ function createNullProtoObject(value) {
   return Object.assign(Object.create(null), value);
 }
 
-function createCurlBlock(command) {
+function createCurlBlock(command, language = "curl") {
   const preElement = new MockElement("pre");
   const codeElement = new MockElement("code");
-  codeElement.className = "language-curl";
+  codeElement.className = `language-${language}`;
   codeElement.textContent = command;
   preElement.appendChild(codeElement);
   return preElement;
@@ -545,6 +545,115 @@ test("copy button uses current env values and current editor text", async () => 
     assert.deepEqual(copyCalls[0].env, {
       BASE_URL: "https://api.example.com",
     });
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("soccli code blocks run against /api/run-soccli", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"));
+    const apiCalls = [];
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async (url, options) => {
+        apiCalls.push({ url, options });
+        return { ok: true };
+      },
+      parseJsonSafe: async () => ({ success: true, output: "connected" }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      localStorageRef: createLocalStorage(),
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+    assert.equal(docContent.querySelectorAll(".soccliPlaygroundInline").length, 1);
+    assert.equal(docContent.querySelectorAll(".curlPlaygroundInline").length, 0);
+    const runButton = docContent.querySelector(".runBtn");
+    runButton.click();
+    await flushAsyncWork();
+
+    assert.equal(apiCalls.length, 1);
+    assert.equal(apiCalls[0].url, "/api/run-soccli");
+    assert.match(String(apiCalls[0].options.body), /soccli raw connect/);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("soccli output streams incrementally from response body reader", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"));
+
+    const chunks = ["connected\n", "message: hello\n"];
+    const response = {
+      ok: true,
+      body: {
+        getReader() {
+          let index = 0;
+          return {
+            async read() {
+              if (index >= chunks.length) {
+                return { done: true, value: undefined };
+              }
+              const value = new TextEncoder().encode(chunks[index]);
+              index += 1;
+              return { done: false, value };
+            },
+          };
+        },
+      },
+    };
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => response,
+      parseJsonSafe: async () => ({ success: true, output: "" }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      localStorageRef: createLocalStorage(),
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+    const runButton = docContent.querySelector(".runBtn");
+    runButton.click();
+    await flushAsyncWork();
+
+    const outputCode = docContent.querySelector(".curlOutput code");
+    assert.equal(outputCode.textContent, "connected\nmessage: hello\n");
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

@@ -6,6 +6,7 @@ import { parseCookies, SESSION_COOKIE_NAME, isSessionTokenValid } from "../core/
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerDocsRoutes } from "./routes/docs.js";
 import { registerCurlRoutes } from "./routes/curl.js";
+import { registerSoccliRoutes } from "./routes/soccli.js";
 import { createAuthRequiredMiddleware } from "./middleware/auth-required.js";
 
 export function createApp({
@@ -58,6 +59,10 @@ export function createApp({
   app.use("/api", createAuthRequiredMiddleware({ authEnabled, isAuthenticated }));
 
   registerCurlRoutes(app, {
+    isDev,
+    ...curlRouteOptions,
+  });
+  registerSoccliRoutes(app, {
     isDev,
     ...curlRouteOptions,
   });

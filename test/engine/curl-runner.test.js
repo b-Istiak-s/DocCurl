@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -13,6 +13,7 @@ import {
 
 import {
   setupCurlRoutes,
+  setupSoccliRoutes,
   parseCurlCommand,
   validateTargetUrl,
 } from "../../engine/index.js";
@@ -61,6 +62,10 @@ async function withServer(options, run) {
   const app = express();
   app.use(express.json({ limit: "128kb" }));
   setupCurlRoutes(app, {
+    containerRuntime: "docker",
+    ...options,
+  });
+  setupSoccliRoutes(app, {
     containerRuntime: "docker",
     ...options,
   });
@@ -316,6 +321,171 @@ test("POST /api/run-curl returns 400 for missing payload", async () => {
   if (!started) {
     return;
   }
+});
+
+test("POST /api/run-soccli returns 400 when command is not prefixed with soccli", async () => {
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "curl https://example.com" }),
+      });
+      assert.equal(response.status, 400);
+      const payload = await response.json();
+      assert.match(payload.error, /start with \"soccli\"/i);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+  }
+});
+
+test("POST /api/run-soccli streams container output and runs with -it flags", async () => {
+  const spawnCalls = [];
+  const spawnImpl = (_runtime, args) => {
+    spawnCalls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+    };
+
+    queueMicrotask(() => {
+      child.stdout.emit("data", "connected\n");
+      child.stderr.emit("data", "server-event\n");
+      child.emit("close", 0, null);
+    });
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+      });
+      assert.equal(response.status, 200);
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.match(output, /server-event/);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+
+  assert.equal(spawnCalls.length, 1);
+  assert.ok(spawnCalls[0].includes("-i"));
+  assert.ok(spawnCalls[0].includes("-t"));
+});
+
+test("POST /api/run-soccli stops streaming when socket times out", async () => {
+  let killed = false;
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      killed = true;
+    };
+
+    queueMicrotask(() => {
+      child.stdout.emit("data", "connected\n");
+    });
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+      soccliSocketTimeoutMs: 20,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+      });
+      const output = await response.text();
+      assert.match(output, /Session timed out/);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+
+  assert.equal(killed, true);
+});
+
+test("POST /api/run-soccli does not inherit curl request timeout", async () => {
+  let killed = false;
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      killed = true;
+    };
+
+    setTimeout(() => {
+      child.stdout.emit("data", "connected\n");
+      child.emit("close", 0, null);
+    }, 40);
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+      requestTimeoutMs: 20,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+      });
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.doesNotMatch(output, /Session timed out/);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
+
+  assert.equal(killed, false);
 });
 
 test("POST /api/run-curl rejects blocked URL before execution", async () => {

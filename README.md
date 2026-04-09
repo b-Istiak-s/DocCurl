@@ -1,8 +1,8 @@
 # doccurl
 
-Interactive curl documentation site with runnable playgrounds.
+Interactive API documentation site with runnable `curl` and `soccli` playgrounds.
 
-`doccurl` lets you write API docs in Markdown and run embedded `curl` commands from a browser UI. It serves docs, replaces placeholder variables (for example `$BASE_URL`), supports generated-file uploads like `@R&{avatar.png}` plus browser-selected multipart uploads like `@/tmp/avatar.png`, and executes requests in a sandboxed Docker/Podman container.
+`doccurl` lets you write API docs in Markdown and run embedded `curl` and `soccli` commands from a browser UI. It serves docs, replaces placeholder variables (for example `$BASE_URL`), supports generated-file uploads like `@R&{avatar.png}` plus browser-selected multipart uploads like `@/tmp/avatar.png`, and executes requests in a sandboxed Docker/Podman container.
 
 ## Install
 
@@ -117,7 +117,7 @@ Output rules:
 
 ## Markdown Playgrounds
 
-Use fenced code blocks with `curl` language:
+Use fenced code blocks with `curl` or `soccli` language:
 
 ````markdown
 ```curl
@@ -126,19 +126,25 @@ curl -X POST $BASE_URL/api/data \\
   -H "Authorization: Bearer $API_TOKEN" \\
   -d '{"name":"test"}'
 ```
+
+```soccli
+soccli raw connect wss://example.com/ws
+```
 ````
 
 Placeholder variables are discovered from docs and can be managed in the UI. Values are stored in browser `localStorage` under `doccurl.env`. Any script running in this origin can read them, so avoid storing long-lived secrets in shared or untrusted browsers.
 
-Edited curl blocks are stored separately in browser `localStorage` under `doccurl.curlEdits.v1`, scoped by document path and curl block ID. Users can reset either the current page’s curl edits or all saved curl edits from the docs UI without affecting env vars.
+Edited playground blocks are stored separately in browser `localStorage` under `doccurl.curlEdits.v1`, scoped by document path and block ID. Users can reset either the current page’s saved edits or all saved playground edits from the docs UI without affecting env vars.
 
-Each curl playground also includes:
+Each playground also includes:
 
 - `Copy`: copies shell-ready `export NAME='value'` lines plus the current curl block exactly as shown.
 - `Upload Files`: appears for multipart `-F` requests, lets users attach browser files for non-generated `@...` multipart parts, and keeps generated `@R&{...}` parts on the built-in synthetic-file path.
 - `Export Curls`: exports all docs grouped by markdown file as Insomnia, Postman, or Hoppscotch JSON, including current env values.
 
 Browser-selected uploads are limited to `10 MB` per file and `25 MB` total per run.
+
+`soccli` sessions stream incremental plain-text output in the browser and default to a `60` second session timeout.
 
 Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your running DocCurl app URL so the built-in self-test pages can run without another service.
 
@@ -156,8 +162,8 @@ Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your 
 | Browser multipart uploads like `-F "file=@/tmp/x.pdf"` | Yes       | No specific change needed                  | x        |
 | Auth headers / API keys / Bearer tokens                | Yes       | No specific change needed                  | x        |
 | Localhost/private targets in `--dev`                   | Yes       | No specific change needed                  | x        |
-| WebSockets                                             | No        | Planned; likely via `websocat`             | high     |
-| GraphQL subscriptions                                  | No        | Planned; likely via `graphql-transport-ws` | low      |
+| WebSockets                                             | Yes       | Via `soccli` playground blocks             | x        |
+| GraphQL subscriptions over WebSocket                   | Yes       | Via `soccli` (`graphql-transport-ws`)      | x        |
 | gRPC                                                   | No        | Not planned yet                            | medium   |
 | Browser-mapped multipart uploads using `@...` tokens   | Yes       | No specific change needed                  | x        |
 | Redirect following with `-L`                           | No        | Not planned yet                            | low      |
@@ -180,13 +186,13 @@ These self-tests are meant for local development without password protection. Lo
 
 ## Security Model
 
-`/api/run-curl` executes curl in a locked-down container.
+`/api/run-curl` and `/api/run-soccli` execute commands in locked-down containers.
 
 Key controls:
 
 - Runtime isolation via Docker/Podman.
 - In production mode, blocks localhost/private/internal targets.
-- Request/response limits (headers/body/output/timeouts).
+- Request/response limits (headers/body/output/timeouts). `curl` runs default to `5` seconds; `soccli` sessions default to `60` seconds.
 - Authentication for API/docs routes when password is enabled.
 
 Multipart form fields support:
@@ -205,6 +211,7 @@ Generated uploads support `png`, `jpg`, `jpeg`, `webp`, `gif`, `avif`, `mp4`, `w
 - `GET /api/docs/tree`
 - `GET /api/docs/content?path=<file.md>`
 - `POST /api/run-curl`
+- `POST /api/run-soccli`
 
 Example run-curl request:
 
