@@ -414,10 +414,16 @@ export function createDocsTreeSystem({
     renderTextBlock(docList, "li", "errorText", message, documentRef);
   }
 
+  function hasInlinePlaygrounds() {
+    return (
+      docContent.querySelectorAll(".curlPlaygroundInline").length > 0 ||
+      docContent.querySelectorAll(".soccliPlaygroundInline").length > 0
+    );
+  }
+
   function createDocActionBar() {
     const features = getFeatures() || {};
-    const hasCurlBlocks =
-      docContent.querySelectorAll(".curlPlaygroundInline, .soccliPlaygroundInline").length > 0;
+    const hasCurlBlocks = hasInlinePlaygrounds();
 
     const actionBar = documentRef.createElement("div");
     actionBar.className = "docActionBar";

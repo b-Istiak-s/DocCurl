@@ -17,6 +17,7 @@ import {
   parseCurlCommand,
   validateTargetUrl,
 } from "../../engine/index.js";
+import { parseSoccliCommand } from "../../engine/soccli/command.js";
 
 let portsBlocked = false;
 let portsChecked = false;
@@ -51,7 +52,9 @@ async function withServer(options, run) {
     portsBlocked = !(await checkPortBinding());
     if (portsBlocked && !printedPortWarning) {
       printedPortWarning = true;
-      console.warn("Skipping socket-based engine tests: local port binding is blocked.");
+      console.warn(
+        "Skipping socket-based engine tests: local port binding is blocked.",
+      );
     }
   }
 
@@ -81,7 +84,9 @@ async function withServer(options, run) {
       portsBlocked = true;
       if (!printedPortWarning) {
         printedPortWarning = true;
-        console.warn("Skipping socket-based engine tests: local port binding is blocked.");
+        console.warn(
+          "Skipping socket-based engine tests: local port binding is blocked.",
+        );
       }
       return false;
     }
@@ -89,7 +94,8 @@ async function withServer(options, run) {
   }
 
   const addressInfo = server.address();
-  const port = addressInfo && typeof addressInfo === "object" ? addressInfo.port : 0;
+  const port =
+    addressInfo && typeof addressInfo === "object" ? addressInfo.port : 0;
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
@@ -124,8 +130,8 @@ test("parseCurlCommand preserves full multiline JSON body", () => {
 
 test("parseCurlCommand accepts CRLF multiline curl commands pasted from Windows editors", () => {
   const command =
-    'curl \\\r\n' +
-    '  -X POST \\\r\n' +
+    "curl \\\r\n" +
+    "  -X POST \\\r\n" +
     '  "https://api.example.com/documents" \\\r\n' +
     '  -H "Authorization: Bearer $TOKEN" \\\r\n' +
     '  -F "compliance_item_id=1" \\\r\n' +
@@ -167,7 +173,9 @@ test("parseCurlCommand parses quoted URL and headers", () => {
 });
 
 test("parseCurlCommand accepts generated multipart uploads and infers POST", () => {
-  const parsed = parseCurlCommand('curl -F "avatar=@R&{avatar.png}" https://api.example.com');
+  const parsed = parseCurlCommand(
+    'curl -F "avatar=@R&{avatar.png}" https://api.example.com',
+  );
 
   assert.equal(parsed.method, "POST");
   assert.equal(parsed.url, "https://api.example.com");
@@ -229,14 +237,20 @@ test("parseCurlCommand accepts browser-upload-backed multipart fields", () => {
 
 test("parseCurlCommand rejects unsupported generated upload extensions", () => {
   assert.throws(
-    () => parseCurlCommand('curl -F "avatar=@R&{avatar.exe}" https://api.example.com'),
+    () =>
+      parseCurlCommand(
+        'curl -F "avatar=@R&{avatar.exe}" https://api.example.com',
+      ),
     /unsupported generated upload extension/i,
   );
 });
 
 test("parseCurlCommand rejects unsupported multipart file modifiers", () => {
   assert.throws(
-    () => parseCurlCommand('curl -F "avatar=@/tmp/x.pdf;type=application/pdf" https://api.example.com'),
+    () =>
+      parseCurlCommand(
+        'curl -F "avatar=@/tmp/x.pdf;type=application/pdf" https://api.example.com',
+      ),
     /not supported/i,
   );
 });
@@ -253,8 +267,23 @@ test("parseCurlCommand rejects mixing multipart and body data", () => {
 
 test("parseCurlCommand rejects unsupported flags", () => {
   assert.throws(
-    () => parseCurlCommand("curl --proxy http://proxy.local https://api.example.com"),
+    () =>
+      parseCurlCommand(
+        "curl --proxy http://proxy.local https://api.example.com",
+      ),
     /Unsupported flag/i,
+  );
+});
+
+test("parseSoccliCommand normalizes validation and tokenizer errors", () => {
+  assert.throws(() => parseSoccliCommand(""), /soccli: invalid command/i);
+  assert.throws(
+    () => parseSoccliCommand("curl https://example.com"),
+    /soccli: command must start with "soccli"/i,
+  );
+  assert.throws(
+    () => parseSoccliCommand('soccli raw "unterminated'),
+    /soccli: tokenizer error - unterminated quote/i,
   );
 });
 
@@ -377,7 +406,9 @@ test("POST /api/run-soccli streams container output and runs with -it flags", as
       const response = await fetch(`${baseUrl}/api/run-soccli`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
       });
       assert.equal(response.status, 200);
       const output = await response.text();
@@ -394,6 +425,64 @@ test("POST /api/run-soccli streams container output and runs with -it flags", as
   assert.equal(spawnCalls.length, 1);
   assert.ok(spawnCalls[0].includes("-i"));
   assert.ok(spawnCalls[0].includes("-t"));
+});
+
+test("POST /api/run-soccli does not cancel healthy runs on normal request close", async () => {
+  const killSignals = [];
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let closed = false;
+    child.kill = (signal = "SIGTERM") => {
+      killSignals.push(signal);
+      if (closed) {
+        return true;
+      }
+      closed = true;
+      queueMicrotask(() => {
+        child.emit("close", null, signal);
+      });
+      return true;
+    };
+
+    setTimeout(() => {
+      if (closed) {
+        return;
+      }
+      child.stdout.emit("data", "connected\n");
+      closed = true;
+      child.emit("close", 0, null);
+    }, 25);
+
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
+      });
+      assert.equal(response.status, 200);
+      const output = await response.text();
+      assert.match(output, /connected/);
+      assert.deepEqual(killSignals, []);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
 });
 
 test("POST /api/run-soccli stops streaming when socket times out", async () => {
@@ -426,7 +515,9 @@ test("POST /api/run-soccli stops streaming when socket times out", async () => {
       const response = await fetch(`${baseUrl}/api/run-soccli`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
       });
       const output = await response.text();
       assert.match(output, /Session timed out/);
@@ -439,6 +530,52 @@ test("POST /api/run-soccli stops streaming when socket times out", async () => {
   }
 
   assert.equal(killed, true);
+});
+
+test("POST /api/run-soccli reports timeout instead of replacement when timeout kills child", async () => {
+  const spawnImpl = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let closed = false;
+    child.kill = (signal = "SIGTERM") => {
+      if (closed) {
+        return true;
+      }
+      closed = true;
+      queueMicrotask(() => {
+        child.emit("close", null, signal);
+      });
+      return true;
+    };
+    return child;
+  };
+
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      spawnImpl,
+      soccliSocketTimeoutMs: 20,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-soccli`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
+      });
+      const payload = await response.json();
+      assert.equal(response.status, 408);
+      assert.match(payload.error, /timed out/i);
+    },
+  );
+
+  if (!started) {
+    test.skip("Socket-based engine tests are skipped in this environment.");
+    return;
+  }
 });
 
 test("POST /api/run-soccli does not inherit curl request timeout", async () => {
@@ -472,7 +609,9 @@ test("POST /api/run-soccli does not inherit curl request timeout", async () => {
       const response = await fetch(`${baseUrl}/api/run-soccli`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "soccli raw connect wss://example.com/ws" }),
+        body: JSON.stringify({
+          command: "soccli raw connect wss://example.com/ws",
+        }),
       });
       const output = await response.text();
       assert.match(output, /connected/);
@@ -529,7 +668,9 @@ test("POST /api/run-curl executes valid parsed command with hardened container a
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/ping"' }),
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
       });
       const data = await response.json();
       assert.equal(response.status, 200);
@@ -580,7 +721,8 @@ test("POST /api/run-curl mounts generated multipart uploads and rewrites curl ar
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+          command:
+            'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
         }),
       });
       const data = await response.json();
@@ -594,7 +736,9 @@ test("POST /api/run-curl mounts generated multipart uploads and rewrites curl ar
 
   assert.equal(calls.length, 1);
   assert.ok(calls[0].args.includes("-v"));
-  assert.ok(calls[0].args.includes("/tmp/doccurl-upload-test:/tmp/doccurl-uploads:ro"));
+  assert.ok(
+    calls[0].args.includes("/tmp/doccurl-upload-test:/tmp/doccurl-uploads:ro"),
+  );
   assert.ok(calls[0].args.includes("-F"));
   assert.ok(calls[0].args.includes("avatar=@/tmp/doccurl-uploads/avatar.png"));
   assert.equal(writes.length, 1);
@@ -616,86 +760,94 @@ test("POST /api/run-curl accepts browser multipart uploads and mounts them by up
   const chmods = [];
   let browserUploadTempDir;
 
-  const started = await withTempDir("doccurl-upload-browser-", async (uploadTempDir) => {
-    browserUploadTempDir = uploadTempDir;
-    return (
-    withServer(
-      {
-        isDev: false,
-        dnsLookup: async () => [{ address: "8.8.8.8" }],
-        uploadFsMkdtemp: async () => uploadTempDir,
-        uploadFsChmod: async (targetPath, mode) => {
-          chmods.push({ targetPath, mode });
-          await fs.chmod(targetPath, mode);
-        },
-        execFileImpl: (command, args, _options, callback) => {
-          calls.push({ command, args });
+  const started = await withTempDir(
+    "doccurl-upload-browser-",
+    async (uploadTempDir) => {
+      browserUploadTempDir = uploadTempDir;
+      return withServer(
+        {
+          isDev: false,
+          dnsLookup: async () => [{ address: "8.8.8.8" }],
+          uploadFsMkdtemp: async () => uploadTempDir,
+          uploadFsChmod: async (targetPath, mode) => {
+            chmods.push({ targetPath, mode });
+            await fs.chmod(targetPath, mode);
+          },
+          execFileImpl: (command, args, _options, callback) => {
+            calls.push({ command, args });
 
-          void fs
-            .readFile(path.join(uploadTempDir, "Therapy_License.pdf"), "utf8")
-            .then((value) => {
-              inspectedUploads.push({
-                filePath: path.join(uploadTempDir, "Therapy_License.pdf"),
-                value,
-              });
-              callback(null, "ok", "");
-            }, callback);
+            void fs
+              .readFile(path.join(uploadTempDir, "Therapy_License.pdf"), "utf8")
+              .then((value) => {
+                inspectedUploads.push({
+                  filePath: path.join(uploadTempDir, "Therapy_License.pdf"),
+                  value,
+                });
+                callback(null, "ok", "");
+              }, callback);
+          },
         },
-      },
-      async (baseUrl) => {
-        const formData = new FormData();
-        formData.append(
-          "command",
-          'curl -F "company_id=1" -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
-        );
-        formData.append(
-          "upload_0",
-          new Blob(["browser-file"], { type: "application/pdf" }),
-          "Therapy License.pdf",
-        );
-        formData.append(
-          "upload_99",
-          new Blob(["ignored"], { type: "text/plain" }),
-          "ignored.txt",
-        );
+        async (baseUrl) => {
+          const formData = new FormData();
+          formData.append(
+            "command",
+            'curl -F "company_id=1" -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+          );
+          formData.append(
+            "upload_0",
+            new Blob(["browser-file"], { type: "application/pdf" }),
+            "Therapy License.pdf",
+          );
+          formData.append(
+            "upload_99",
+            new Blob(["ignored"], { type: "text/plain" }),
+            "ignored.txt",
+          );
 
-        const response = await fetch(`${baseUrl}/api/run-curl`, {
-          method: "POST",
-          body: formData,
-        });
-        const data = await response.json();
-        assert.equal(response.status, 200);
-        assert.equal(data.success, true);
-      },
-    )
-    );
-  });
+          const response = await fetch(`${baseUrl}/api/run-curl`, {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          assert.equal(response.status, 200);
+          assert.equal(data.success, true);
+        },
+      );
+    },
+  );
   if (!started) {
     return;
   }
 
   assert.equal(calls.length, 1);
-  const formFlags = calls[0].args.filter((value, index, array) => array[index - 1] === "-F");
+  const formFlags = calls[0].args.filter(
+    (value, index, array) => array[index - 1] === "-F",
+  );
   assert.deepEqual(formFlags, [
     "company_id=1",
     "documents[]=@/tmp/doccurl-uploads/Therapy_License.pdf",
   ]);
   assert.deepEqual(inspectedUploads, [
     {
-      filePath: path.join(calls[0].args[calls[0].args.indexOf("-v") + 1].split(":")[0], "Therapy_License.pdf"),
+      filePath: path.join(
+        calls[0].args[calls[0].args.indexOf("-v") + 1].split(":")[0],
+        "Therapy_License.pdf",
+      ),
       value: "browser-file",
     },
   ]);
   assert.equal(
     chmods.some(
-      ({ targetPath, mode }) => targetPath === browserUploadTempDir && mode === 0o700,
+      ({ targetPath, mode }) =>
+        targetPath === browserUploadTempDir && mode === 0o700,
     ),
     true,
   );
   assert.equal(
     chmods.some(
       ({ targetPath, mode }) =>
-        targetPath === path.join(browserUploadTempDir, ".incoming") && mode === 0o700,
+        targetPath === path.join(browserUploadTempDir, ".incoming") &&
+        mode === 0o700,
     ),
     true,
   );
@@ -750,50 +902,54 @@ test("POST /api/run-curl rejects browser-upload-backed multipart fields when fil
 
 test("POST /api/run-curl rejects multipart uploads once streamed total size exceeds the limit", async () => {
   const removals = [];
-  const started = await withTempDir("doccurl-upload-total-limit-", async (uploadTempDir) =>
-    withServer(
-      {
-        isDev: false,
-        dnsLookup: async () => [{ address: "8.8.8.8" }],
-        uploadLimits: {
-          maxUploadTotalBytes: 5,
+  const started = await withTempDir(
+    "doccurl-upload-total-limit-",
+    async (uploadTempDir) =>
+      withServer(
+        {
+          isDev: false,
+          dnsLookup: async () => [{ address: "8.8.8.8" }],
+          uploadLimits: {
+            maxUploadTotalBytes: 5,
+          },
+          uploadFsMkdtemp: async () => uploadTempDir,
+          uploadFsRm: async (targetPath, options) => {
+            removals.push({ targetPath, options });
+            await fs.rm(targetPath, options);
+          },
+          execFileImpl: () => {
+            throw new Error(
+              "exec should not run when upload total exceeds the limit",
+            );
+          },
         },
-        uploadFsMkdtemp: async () => uploadTempDir,
-        uploadFsRm: async (targetPath, options) => {
-          removals.push({ targetPath, options });
-          await fs.rm(targetPath, options);
-        },
-        execFileImpl: () => {
-          throw new Error("exec should not run when upload total exceeds the limit");
-        },
-      },
-      async (baseUrl) => {
-        const formData = new FormData();
-        formData.append(
-          "command",
-          'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
-        );
-        formData.append(
-          "upload_0",
-          new Blob(["abc"], { type: "application/pdf" }),
-          "license.pdf",
-        );
-        formData.append(
-          "upload_99",
-          new Blob(["def"], { type: "text/plain" }),
-          "ignored.txt",
-        );
+        async (baseUrl) => {
+          const formData = new FormData();
+          formData.append(
+            "command",
+            'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+          );
+          formData.append(
+            "upload_0",
+            new Blob(["abc"], { type: "application/pdf" }),
+            "license.pdf",
+          );
+          formData.append(
+            "upload_99",
+            new Blob(["def"], { type: "text/plain" }),
+            "ignored.txt",
+          );
 
-        const response = await fetch(`${baseUrl}/api/run-curl`, {
-          method: "POST",
-          body: formData,
-        });
-        const data = await response.json();
+          const response = await fetch(`${baseUrl}/api/run-curl`, {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
 
-        assert.equal(response.status, 400);
-        assert.match(data.error, /must total/i);
-      },
-    ),
+          assert.equal(response.status, 400);
+          assert.match(data.error, /must total/i);
+        },
+      ),
   );
   if (!started) {
     return;
@@ -807,42 +963,46 @@ test("POST /api/run-curl rejects multipart uploads once streamed total size exce
 });
 
 test("POST /api/run-curl rejects multipart uploads once a streamed file exceeds the per-file limit", async () => {
-  const started = await withTempDir("doccurl-upload-file-limit-", async (uploadTempDir) =>
-    withServer(
-      {
-        isDev: false,
-        dnsLookup: async () => [{ address: "8.8.8.8" }],
-        uploadLimits: {
-          maxUploadFileBytes: 5,
-          maxUploadTotalBytes: 50,
+  const started = await withTempDir(
+    "doccurl-upload-file-limit-",
+    async (uploadTempDir) =>
+      withServer(
+        {
+          isDev: false,
+          dnsLookup: async () => [{ address: "8.8.8.8" }],
+          uploadLimits: {
+            maxUploadFileBytes: 5,
+            maxUploadTotalBytes: 50,
+          },
+          uploadFsMkdtemp: async () => uploadTempDir,
+          execFileImpl: () => {
+            throw new Error(
+              "exec should not run when upload file exceeds the limit",
+            );
+          },
         },
-        uploadFsMkdtemp: async () => uploadTempDir,
-        execFileImpl: () => {
-          throw new Error("exec should not run when upload file exceeds the limit");
+        async (baseUrl) => {
+          const formData = new FormData();
+          formData.append(
+            "command",
+            'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
+          );
+          formData.append(
+            "upload_0",
+            new Blob(["123456"], { type: "application/pdf" }),
+            "license.pdf",
+          );
+
+          const response = await fetch(`${baseUrl}/api/run-curl`, {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+
+          assert.equal(response.status, 400);
+          assert.match(data.error, /each uploaded file must be/i);
         },
-      },
-      async (baseUrl) => {
-        const formData = new FormData();
-        formData.append(
-          "command",
-          'curl -F "documents[]=@/tmp/license.pdf" "https://api.example.com/upload"',
-        );
-        formData.append(
-          "upload_0",
-          new Blob(["123456"], { type: "application/pdf" }),
-          "license.pdf",
-        );
-
-        const response = await fetch(`${baseUrl}/api/run-curl`, {
-          method: "POST",
-          body: formData,
-        });
-        const data = await response.json();
-
-        assert.equal(response.status, 400);
-        assert.match(data.error, /each uploaded file must be/i);
-      },
-    ),
+      ),
   );
   if (!started) {
     return;
@@ -855,7 +1015,9 @@ test("POST /api/run-curl rejects unexpected multipart text fields during streami
       isDev: false,
       dnsLookup: async () => [{ address: "8.8.8.8" }],
       execFileImpl: () => {
-        throw new Error("exec should not run when multipart fields are invalid");
+        throw new Error(
+          "exec should not run when multipart fields are invalid",
+        );
       },
     },
     async (baseUrl) => {
@@ -884,40 +1046,45 @@ test("POST /api/run-curl rejects unexpected multipart text fields during streami
 test("POST /api/run-curl cleans up upload temp dirs when multipart parser setup throws", async () => {
   const removals = [];
   let uploadTempDir;
-  const started = await withTempDir("doccurl-upload-parser-setup-", async (tempDir) => {
-    uploadTempDir = tempDir;
-    return withServer(
-      {
-        isDev: false,
-        dnsLookup: async () => [{ address: "8.8.8.8" }],
-        uploadFsMkdtemp: async () => uploadTempDir,
-        uploadFsMkdir: async (targetPath, options) => {
-          await fs.mkdir(targetPath, options);
+  const started = await withTempDir(
+    "doccurl-upload-parser-setup-",
+    async (tempDir) => {
+      uploadTempDir = tempDir;
+      return withServer(
+        {
+          isDev: false,
+          dnsLookup: async () => [{ address: "8.8.8.8" }],
+          uploadFsMkdtemp: async () => uploadTempDir,
+          uploadFsMkdir: async (targetPath, options) => {
+            await fs.mkdir(targetPath, options);
+          },
+          uploadFsRm: async (targetPath, options) => {
+            removals.push({ targetPath, options });
+            await fs.rm(targetPath, options);
+          },
+          BusboyImpl: () => {
+            throw new Error("Multipart boundary missing");
+          },
+          execFileImpl: () => {
+            throw new Error(
+              "exec should not run when multipart parser setup fails",
+            );
+          },
         },
-        uploadFsRm: async (targetPath, options) => {
-          removals.push({ targetPath, options });
-          await fs.rm(targetPath, options);
-        },
-        BusboyImpl: () => {
-          throw new Error("Multipart boundary missing");
-        },
-        execFileImpl: () => {
-          throw new Error("exec should not run when multipart parser setup fails");
-        },
-      },
-      async (baseUrl) => {
-        const response = await fetch(`${baseUrl}/api/run-curl`, {
-          method: "POST",
-          headers: { "Content-Type": "multipart/form-data" },
-          body: "--ignored--",
-        });
-        const data = await response.json();
+        async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/api/run-curl`, {
+            method: "POST",
+            headers: { "Content-Type": "multipart/form-data" },
+            body: "--ignored--",
+          });
+          const data = await response.json();
 
-        assert.equal(response.status, 400);
-        assert.match(data.error, /multipart boundary missing/i);
-      },
-    );
-  });
+          assert.equal(response.status, 400);
+          assert.match(data.error, /multipart boundary missing/i);
+        },
+      );
+    },
+  );
   if (!started) {
     return;
   }
@@ -938,7 +1105,9 @@ test("POST /api/run-curl rejects oversized multipart command fields during strea
         maxCommandLength: 10,
       },
       execFileImpl: () => {
-        throw new Error("exec should not run when multipart command field is too large");
+        throw new Error(
+          "exec should not run when multipart command field is too large",
+        );
       },
     },
     async (baseUrl) => {
@@ -1001,7 +1170,9 @@ test("POST /api/run-curl keeps multipart text fields while mounting generated up
   }
 
   assert.equal(calls.length, 1);
-  const formFlags = calls[0].args.filter((value, index, array) => array[index - 1] === "-F");
+  const formFlags = calls[0].args.filter(
+    (value, index, array) => array[index - 1] === "-F",
+  );
   assert.deepEqual(formFlags, [
     "company_id=1",
     "documents[]=@/tmp/doccurl-uploads/license.pdf",
@@ -1040,7 +1211,8 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+          command:
+            'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
         }),
       });
       const data = await response.json();
@@ -1055,7 +1227,10 @@ test("POST /api/run-curl cleans up generated uploads when execution fails", asyn
 
   assert.equal(loggedErrors.length, 1);
   assert.equal(loggedErrors[0].message, "Curl execution failed");
-  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.equal(
+    loggedErrors[0].details.requestUrl,
+    "https://api.example.com/upload",
+  );
   assert.deepEqual(loggedErrors[0].details.error, {
     message: "Execution failed",
   });
@@ -1100,7 +1275,10 @@ test("POST /api/run-curl strips credentials and query params from logged request
 
   assert.equal(loggedErrors.length, 1);
   assert.equal(loggedErrors[0].message, "Curl execution failed");
-  assert.equal(loggedErrors[0].details.requestUrl, "https://api.example.com/upload");
+  assert.equal(
+    loggedErrors[0].details.requestUrl,
+    "https://api.example.com/upload",
+  );
   assert.deepEqual(loggedErrors[0].details.error, {
     message: "Execution failed",
   });
@@ -1131,7 +1309,8 @@ test("POST /api/run-curl cleans up generated uploads when mount preparation fail
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          command: 'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
+          command:
+            'curl -F "avatar=@R&{avatar.png}" "https://api.example.com/upload"',
         }),
       });
       const data = await response.json();
@@ -1167,7 +1346,9 @@ test("POST /api/run-curl returns upstream status, content type, and timing metad
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/ping"' }),
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
       });
       const data = await response.json();
 
@@ -1203,7 +1384,9 @@ test("POST /api/run-curl preserves upstream HTTP 500 responses in output metadat
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "https://api.example.com/v1/fail"' }),
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/fail"',
+        }),
       });
       const data = await response.json();
 
@@ -1272,7 +1455,9 @@ test("POST /api/run-curl uses host network in dev mode for localhost targets", a
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "http://localhost:3000/health"' }),
+        body: JSON.stringify({
+          command: 'curl "http://localhost:3000/health"',
+        }),
       });
       const data = await response.json();
       assert.equal(response.status, 200);
@@ -1302,7 +1487,9 @@ test("POST /api/run-curl keeps bridge network in production mode", async () => {
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "https://api.example.com/ping"' }),
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/ping"',
+        }),
       });
       assert.equal(response.status, 200);
     },
@@ -1343,7 +1530,9 @@ test("POST /api/run-curl continues when /etc/containers/nodocker creation fails"
       const response = await fetch(`${baseUrl}/api/run-curl`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: 'curl "http://localhost:3000/health"' }),
+        body: JSON.stringify({
+          command: 'curl "http://localhost:3000/health"',
+        }),
       });
       const data = await response.json();
       assert.equal(response.status, 200);
@@ -1356,7 +1545,9 @@ test("POST /api/run-curl continues when /etc/containers/nodocker creation fails"
 
   assert.equal(warnings.length > 0, true);
   assert.equal(
-    warnings.some((message) => message.includes("sudo touch /etc/containers/nodocker")),
+    warnings.some((message) =>
+      message.includes("sudo touch /etc/containers/nodocker"),
+    ),
     true,
   );
 });

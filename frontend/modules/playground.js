@@ -3,7 +3,11 @@ import { replacePlaceholders } from "./env.js";
 const STORAGE_KEYS = {
   curlEdits: "doccurl.curlEdits.v1",
 };
-const RESERVED_STORAGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const RESERVED_STORAGE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
 const UPLOAD_LIMITS = {
   maxFileBytes: 10 * 1024 * 1024,
   maxTotalBytes: 25 * 1024 * 1024,
@@ -76,7 +80,10 @@ export function loadStoredCurlEdits(localStorageRef = globalThis.localStorage) {
   }
 }
 
-function persistStoredCurlEdits(edits, localStorageRef = globalThis.localStorage) {
+function persistStoredCurlEdits(
+  edits,
+  localStorageRef = globalThis.localStorage,
+) {
   if (!localStorageRef?.setItem) {
     return;
   }
@@ -88,11 +95,16 @@ function persistStoredCurlEdits(edits, localStorageRef = globalThis.localStorage
 }
 
 export function createStableCurlBlockId(docPath, blockIndex, originalCommand) {
-  const normalizedCommand = formatCurlCommand(originalCommand) || String(originalCommand || "").trim();
+  const normalizedCommand =
+    formatCurlCommand(originalCommand) || String(originalCommand || "").trim();
   return `curl-${blockIndex}-${hashString(`${docPath}\n${normalizedCommand}`)}`;
 }
 
-export function getStoredCurlEdit(docPath, blockId, localStorageRef = globalThis.localStorage) {
+export function getStoredCurlEdit(
+  docPath,
+  blockId,
+  localStorageRef = globalThis.localStorage,
+) {
   const edits = loadStoredCurlEdits(localStorageRef);
   return edits[docPath]?.[blockId] || "";
 }
@@ -144,14 +156,18 @@ export function clearStoredCurlEditsForDocument(
   return edits;
 }
 
-export function clearAllStoredCurlEdits(localStorageRef = globalThis.localStorage) {
+export function clearAllStoredCurlEdits(
+  localStorageRef = globalThis.localStorage,
+) {
   const emptyEdits = Object.create(null);
   persistStoredCurlEdits(emptyEdits, localStorageRef);
   return emptyEdits;
 }
 
 export function tokenizeShell(input) {
-  const normalizedInput = String(input || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalizedInput = String(input || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
   const tokens = [];
   let current = "";
   let quote = null;
@@ -402,19 +418,27 @@ function createUploadInputId(blockId, uploadIndex) {
 }
 
 function createUploadLabelText(parts, part) {
-  const matchingParts = parts.filter((candidate) => candidate.name === part.name);
+  const matchingParts = parts.filter(
+    (candidate) => candidate.name === part.name,
+  );
   if (matchingParts.length <= 1) {
     return part.name;
   }
 
   const position = matchingParts.findIndex(
-    (candidate) => candidate.uploadIndex === part.uploadIndex && candidate.signature === part.signature,
+    (candidate) =>
+      candidate.uploadIndex === part.uploadIndex &&
+      candidate.signature === part.signature,
   );
 
   return `${part.name} (${position + 1})`;
 }
 
-function mapSelectedUploadsToParts(previousParts, selectedUploadFiles, nextParts) {
+function mapSelectedUploadsToParts(
+  previousParts,
+  selectedUploadFiles,
+  nextParts,
+) {
   const nextSelectedFiles = new Map();
   const usedPreviousIndices = new Set();
 
@@ -443,9 +467,9 @@ function mapSelectedUploadsToParts(previousParts, selectedUploadFiles, nextParts
     const nextPartPosition = nextParts
       .slice(0, nextParts.indexOf(nextPart) + 1)
       .filter((candidate) => candidate.name === nextPart.name).length;
-    const matchingNamePart = previousParts
-      .filter((candidate) => candidate.name === nextPart.name)
-      [nextPartPosition - 1];
+    const matchingNamePart = previousParts.filter(
+      (candidate) => candidate.name === nextPart.name,
+    )[nextPartPosition - 1];
 
     if (matchingNamePart && assignFile(nextPart, matchingNamePart)) {
       continue;
@@ -711,7 +735,8 @@ function renderLoading(outputElement) {
 }
 
 function renderEmpty(outputElement) {
-  outputElement.innerHTML = '<div class="outputEmpty">Run a command to see the response</div>';
+  outputElement.innerHTML =
+    '<div class="outputEmpty">Run a command to see the response</div>';
 }
 
 function normalizeResponseMetadata(metadata) {
@@ -719,12 +744,16 @@ function normalizeResponseMetadata(metadata) {
     return null;
   }
 
-  const statusCode = Number.isFinite(metadata.statusCode) ? metadata.statusCode : null;
+  const statusCode = Number.isFinite(metadata.statusCode)
+    ? metadata.statusCode
+    : null;
   const contentType =
     typeof metadata.contentType === "string" && metadata.contentType.trim()
       ? metadata.contentType.trim()
       : null;
-  const durationMs = Number.isFinite(metadata.durationMs) ? metadata.durationMs : null;
+  const durationMs = Number.isFinite(metadata.durationMs)
+    ? metadata.durationMs
+    : null;
 
   if (statusCode == null && contentType == null && durationMs == null) {
     return null;
@@ -747,7 +776,10 @@ function formatResponseDuration(durationMs) {
   }
 
   const seconds = durationMs / 1000;
-  return `${seconds.toFixed(seconds >= 10 ? 1 : 2).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0$/, "$1")} s`;
+  return `${seconds
+    .toFixed(seconds >= 10 ? 1 : 2)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*[1-9])0$/, "$1")} s`;
 }
 
 function hideResponseMetaToast(state) {
@@ -766,7 +798,10 @@ function renderResponseMetaToast(state) {
   }
 
   const items = [
-    ["Status", metadata.statusCode == null ? "Unavailable" : String(metadata.statusCode)],
+    [
+      "Status",
+      metadata.statusCode == null ? "Unavailable" : String(metadata.statusCode),
+    ],
     ["Content-Type", metadata.contentType || "Unavailable"],
     ["Time", formatResponseDuration(metadata.durationMs)],
   ];
@@ -902,7 +937,9 @@ export function createPlaygroundSystem({
     state.selectedUploadFiles.clear();
     state.uploadValidationMessage = "";
     state.isUploadPanelOpen = false;
-    state.multipartMetadata = parseCurlMultipartMetadata(state.originalTemplate);
+    state.multipartMetadata = parseCurlMultipartMetadata(
+      state.originalTemplate,
+    );
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
     syncUploadUI(state);
@@ -973,7 +1010,10 @@ export function createPlaygroundSystem({
       nameCell.className = "curlUploadNameCell";
       const nameText = state.documentRef.createElement("label");
       nameText.className = "curlUploadFieldName";
-      nameText.textContent = createUploadLabelText(state.multipartMetadata.uploadParts, part);
+      nameText.textContent = createUploadLabelText(
+        state.multipartMetadata.uploadParts,
+        part,
+      );
 
       const fileCell = state.documentRef.createElement("div");
       fileCell.className = "curlUploadFileCell";
@@ -1059,7 +1099,9 @@ export function createPlaygroundSystem({
   }
 
   function syncMultipartState(state) {
-    const multipartMetadata = parseCurlMultipartMetadata(state.editorElement.value || "");
+    const multipartMetadata = parseCurlMultipartMetadata(
+      state.editorElement.value || "",
+    );
     syncSelectedUploads(state, multipartMetadata);
     state.multipartMetadata = multipartMetadata;
     if (multipartMetadata.uploadParts.length === 0) {
@@ -1080,7 +1122,6 @@ export function createPlaygroundSystem({
         body: JSON.stringify({ command }),
       };
     }
-
     const resolvedMultipartMetadata = parseCurlMultipartMetadata(command);
     const resolvedSelectedFiles = mapSelectedUploadsToParts(
       state.multipartMetadata.uploadParts,
@@ -1149,14 +1190,14 @@ export function createPlaygroundSystem({
     };
   }
 
-  async function runCurlCommand(requestOptions, state) {
+  async function runCurlCommand(requestOptions, state, runController) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
     const { urlOverride, ...fetchOptions } = requestOptions;
     try {
-      const response = await apiFetch(withBasePath(urlOverride || "/api/run-curl"), {
+      const response = await apiFetch(withBasePath("/api/run-curl"), {
         method: "POST",
-        signal: state.activeRunController?.signal,
+        signal: runController.signal,
         ...fetchOptions,
       });
 
@@ -1184,7 +1225,7 @@ export function createPlaygroundSystem({
       }
       showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
     } finally {
-      if (!state.activeRunController?.signal?.aborted) {
+      if (state.activeRunController === runController) {
         state.activeRunController = null;
       }
     }
@@ -1200,16 +1241,19 @@ export function createPlaygroundSystem({
     return codeElement;
   }
 
-  async function runSoccliCommand(requestOptions, state) {
+  async function runSoccliCommand(requestOptions, state, runController) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
     const { urlOverride, ...fetchOptions } = requestOptions;
     try {
-      const response = await apiFetch(withBasePath(urlOverride || "/api/run-soccli"), {
-        method: "POST",
-        signal: state.activeRunController?.signal,
-        ...fetchOptions,
-      });
+      const response = await apiFetch(
+        withBasePath(urlOverride || "/api/run-soccli"),
+        {
+          method: "POST",
+          signal: runController.signal,
+          ...fetchOptions,
+        },
+      );
 
       if (!response.ok) {
         const data = await parseJsonSafe(response);
@@ -1218,8 +1262,16 @@ export function createPlaygroundSystem({
         return;
       }
 
-      const outputCode = renderStreamingStart(state.outputElement);
       const responseBody = response.body;
+      const contentType = String(
+        response.headers?.get?.("content-type") || "",
+      );
+
+      if (/application\/json/i.test(contentType)) {
+        const data = await parseJsonSafe(response);
+        renderResponseOutput(state.outputElement, data.output || "", false);
+        return;
+      }
 
       if (!responseBody?.getReader) {
         const data = await parseJsonSafe(response);
@@ -1227,6 +1279,7 @@ export function createPlaygroundSystem({
         return;
       }
 
+      const outputCode = renderStreamingStart(state.outputElement);
       const reader = responseBody.getReader();
       const decoder = new TextDecoder();
       let received = "";
@@ -1256,7 +1309,7 @@ export function createPlaygroundSystem({
       }
       showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
     } finally {
-      if (!state.activeRunController?.signal?.aborted) {
+      if (state.activeRunController === runController) {
         state.activeRunController = null;
       }
     }
@@ -1273,8 +1326,10 @@ export function createPlaygroundSystem({
     if (state.activeRunController) {
       state.activeRunController.abort();
     }
-    state.activeRunController = new AbortController();
-    const runPath = state.commandKind === "soccli" ? "/api/run-soccli" : "/api/run-curl";
+    const runController = new AbortController();
+    state.activeRunController = runController;
+    const runPath =
+      state.commandKind === "soccli" ? "/api/run-soccli" : "/api/run-curl";
     const runRequest = isSoccliState(state) ? runSoccliCommand : runCurlCommand;
     await runRequest(
       {
@@ -1282,19 +1337,29 @@ export function createPlaygroundSystem({
         urlOverride: runPath,
       },
       state,
+      runController,
     );
   }
 
-  function createPlayground(commandText, { docPath, blockIndex, commandKind = "curl" }) {
+  function createPlayground(
+    commandText,
+    { docPath, blockIndex, commandKind = "curl" },
+  ) {
     const playgroundId = `playground-${playgroundCounter}`;
     playgroundCounter += 1;
     const originalTemplate = formatCurlCommand(commandText);
     const blockDocPath = commandKind === "curl" ? docPath : `${docPath}:soccli`;
-    const blockId = createStableCurlBlockId(blockDocPath, blockIndex, originalTemplate);
+    const blockId = createStableCurlBlockId(
+      blockDocPath,
+      blockIndex,
+      originalTemplate,
+    );
     const isSoccli = commandKind === "soccli";
 
     const playground = documentRef.createElement("div");
-    playground.className = isSoccli ? "soccliPlaygroundInline" : "curlPlaygroundInline";
+    playground.className = isSoccli
+      ? "soccliPlaygroundInline"
+      : "curlPlaygroundInline";
     playground.dataset.playgroundId = playgroundId;
     playground.dataset.curlBlockId = blockId;
     playground.dataset.playgroundKind = commandKind;
@@ -1501,38 +1566,25 @@ export function createPlaygroundSystem({
     }
     playgroundStates.clear();
     currentDocPath = docPath;
-    const codeBlocks = [...docContent.querySelectorAll("pre code.language-curl")];
-
-    codeBlocks.forEach((block, blockIndex) => {
-      const curlCommand = block.textContent.trim();
-      const preElement = block.parentElement;
-      const playground = createPlayground(curlCommand, {
-        docPath,
-        blockIndex,
-        commandKind: "curl",
-      });
-      preElement.replaceWith(playground);
-    });
-  }
-
-  function initializeSoccliPlaygrounds(docPath) {
-    const codeBlocks = [...docContent.querySelectorAll("pre code.language-soccli")];
+    const codeBlocks = [
+      ...docContent.querySelectorAll(
+        "pre code.language-curl, pre code.language-soccli",
+      ),
+    ];
 
     codeBlocks.forEach((block, blockIndex) => {
       const command = block.textContent.trim();
       const preElement = block.parentElement;
+      const commandKind = block.classList.contains("language-soccli")
+        ? "soccli"
+        : "curl";
       const playground = createPlayground(command, {
         docPath,
         blockIndex,
-        commandKind: "soccli",
+        commandKind,
       });
       preElement.replaceWith(playground);
     });
-  }
-
-  function initializeCommandPlaygrounds(docPath) {
-    initializeCurlPlaygrounds(docPath);
-    initializeSoccliPlaygrounds(docPath);
   }
 
   return {
@@ -1540,8 +1592,7 @@ export function createPlaygroundSystem({
     openFullscreen,
     resetCurrentDocument,
     resetAllDocuments,
-    initializeCurlPlaygrounds: initializeCommandPlaygrounds,
-    initializeSoccliPlaygrounds,
+    initializeCurlPlaygrounds,
     hasFullscreenOpen() {
       return Boolean(fullscreenState);
     },
