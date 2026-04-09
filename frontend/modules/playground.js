@@ -1262,8 +1262,16 @@ export function createPlaygroundSystem({
         return;
       }
 
-      const outputCode = renderStreamingStart(state.outputElement);
       const responseBody = response.body;
+      const contentType = String(
+        response.headers?.get?.("content-type") || "",
+      );
+
+      if (/application\/json/i.test(contentType)) {
+        const data = await parseJsonSafe(response);
+        renderResponseOutput(state.outputElement, data.output || "", false);
+        return;
+      }
 
       if (!responseBody?.getReader) {
         const data = await parseJsonSafe(response);
@@ -1271,6 +1279,7 @@ export function createPlaygroundSystem({
         return;
       }
 
+      const outputCode = renderStreamingStart(state.outputElement);
       const reader = responseBody.getReader();
       const decoder = new TextDecoder();
       let received = "";
@@ -1551,7 +1560,7 @@ export function createPlaygroundSystem({
     }
   }
 
-  function initializeCommandPlaygrounds(docPath) {
+  function initializeCurlPlaygrounds(docPath) {
     for (const state of playgroundStates.values()) {
       hideResponseMetaToast(state);
     }
@@ -1576,28 +1585,6 @@ export function createPlaygroundSystem({
       });
       preElement.replaceWith(playground);
     });
-  }
-
-  function initializeSoccliPlaygrounds(docPath) {
-    const codeBlocks = [
-      ...docContent.querySelectorAll("pre code.language-soccli"),
-    ];
-
-    codeBlocks.forEach((block, blockIndex) => {
-      const command = block.textContent.trim();
-      const preElement = block.parentElement;
-      const playground = createPlayground(command, {
-        docPath,
-        blockIndex,
-        commandKind: "soccli",
-      });
-      preElement.replaceWith(playground);
-    });
-  }
-
-  function initializeCommandPlaygrounds(docPath) {
-    initializeCurlPlaygrounds(docPath);
-    initializeSoccliPlaygrounds(docPath);
   }
 
   return {

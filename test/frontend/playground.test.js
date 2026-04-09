@@ -715,6 +715,70 @@ test("soccli output streams incrementally from response body reader", async () =
   }
 });
 
+test("soccli quiet success renders JSON output instead of raw payload text", async () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock("soccli raw connect wss://example.com/ws", "soccli"),
+    );
+
+    const response = {
+      ok: true,
+      headers: {
+        get(name) {
+          if (String(name).toLowerCase() === "content-type") {
+            return "application/json; charset=utf-8";
+          }
+          return null;
+        },
+      },
+      body: {
+        getReader() {
+          return {
+            async read() {
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+    };
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => response,
+      parseJsonSafe: async () => ({ success: true, output: "quiet success" }),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      localStorageRef: createLocalStorage(),
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+    const runButton = docContent.querySelector(".runBtn");
+    runButton.click();
+    await flushAsyncWork();
+
+    const outputCode = docContent.querySelector(".curlOutput code");
+    assert.equal(outputCode.textContent, "quiet success");
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
 test("upload overlay opens and closes for upload-backed multipart rows without rendering a title", () => {
   const previousDocument = global.document;
   const previousWindow = global.window;
