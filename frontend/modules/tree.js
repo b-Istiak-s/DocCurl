@@ -318,13 +318,20 @@ export function collectCollapsedVisibleElements(container) {
     }
   }
 
+  function isCommandPlaygroundElement(element) {
+    return (
+      element?.classList?.contains("curlPlaygroundInline") ||
+      element?.classList?.contains("soccliPlaygroundInline")
+    );
+  }
+
   function walk(node) {
     Array.from(node.children || []).forEach((child) => {
       if (isAlwaysVisibleElement(child)) {
         visibleElements.add(child);
       }
 
-      if (child?.classList?.contains("curlPlaygroundInline")) {
+      if (isCommandPlaygroundElement(child)) {
         addElementAndAncestors(child);
         if (lastHeading) {
           addElementAndAncestors(lastHeading);
@@ -355,7 +362,8 @@ export function applyCollapsedDocumentView(container, isCollapsed) {
         preserveSubtree ||
         (visibleElements?.has(child) && isHeadingElement(child)) ||
         isAlwaysVisibleElement(child) ||
-        child?.classList?.contains("curlPlaygroundInline");
+        child?.classList?.contains("curlPlaygroundInline") ||
+        child?.classList?.contains("soccliPlaygroundInline");
       const shouldHide =
         isCollapsed &&
         !shouldPreserveSubtree &&
@@ -409,7 +417,7 @@ export function createDocsTreeSystem({
   function createDocActionBar() {
     const features = getFeatures() || {};
     const hasCurlBlocks =
-      docContent.querySelectorAll(".curlPlaygroundInline").length > 0;
+      docContent.querySelectorAll(".curlPlaygroundInline, .soccliPlaygroundInline").length > 0;
 
     const actionBar = documentRef.createElement("div");
     actionBar.className = "docActionBar";

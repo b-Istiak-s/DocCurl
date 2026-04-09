@@ -565,7 +565,8 @@ body.auth-locked {
   word-break: break-word;
 }
 
-.curlPlaygroundInline {
+.curlPlaygroundInline,
+.soccliPlaygroundInline {
   position: relative;
   width: 100%;
   margin: 14px 0 22px;
@@ -954,7 +955,8 @@ body.auth-locked {
   min-height: 100%;
 }
 
-#fullscreenMount .curlPlaygroundInline {
+#fullscreenMount .curlPlaygroundInline,
+#fullscreenMount .soccliPlaygroundInline {
   height: 100%;
   min-height: 100%;
   margin: 0;
@@ -1096,7 +1098,8 @@ body.auth-locked {
     padding: 18px;
   }
 
-  .curlPlaygroundInline {
+  .curlPlaygroundInline,
+  .soccliPlaygroundInline {
     grid-template-columns: 1fr;
   }
 
@@ -1214,7 +1217,8 @@ body.auth-locked {
     padding: 42px 10px 10px;
   }
 
-  #fullscreenMount .curlPlaygroundInline {
+  #fullscreenMount .curlPlaygroundInline,
+  #fullscreenMount .soccliPlaygroundInline {
     grid-template-columns: 1fr;
   }
 }

@@ -282,7 +282,7 @@ export function setupCurlRoutes(app, options = {}) {
           timeout: LIMITS.requestTimeoutMs,
           maxBuffer: LIMITS.maxOutputBytes,
         },
-        (error, stdout, stderr) => {
+        (error, stdout) => {
           finishWithCleanup(() => {
             if (error) {
               logCurlExecutionFailure({
@@ -315,4 +315,5 @@ export function setupCurlRoutes(app, options = {}) {
       );
     }
   });
+
 }
