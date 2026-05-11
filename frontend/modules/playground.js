@@ -884,12 +884,23 @@ function renderSchemaOutput(containerElement, schema, rawSchema, errorMessage) {
   highlightCodeElement(codeElement, language);
 }
 
-function createTabButton(documentRef, className, label, active, onClick) {
+function createTabButton(
+  documentRef,
+  className,
+  label,
+  active,
+  onClick,
+  { controlsId = "" } = {},
+) {
   const button = documentRef.createElement("button");
   button.type = "button";
   button.className = className;
   button.textContent = label;
-  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.setAttribute("role", "tab");
+  button.setAttribute("aria-selected", active ? "true" : "false");
+  if (controlsId) {
+    button.setAttribute("aria-controls", controlsId);
+  }
   button.classList.toggle("is-active", active);
   button.addEventListener("click", onClick);
   return button;
@@ -984,6 +995,7 @@ function renderRequestTabs(state) {
     state.activeRequestTab = "curl";
   }
 
+  state.requestTabsElement.setAttribute("role", "tablist");
   state.requestTabsElement.replaceChildren();
   tabs.forEach((tab) => {
     state.requestTabsElement.appendChild(
@@ -996,6 +1008,9 @@ function renderRequestTabs(state) {
           state.activeRequestTab = tab.id;
           renderRequestTabs(state);
           syncRequestContentVisibility(state);
+        },
+        {
+          controlsId: tab.id === "curl" ? "" : state.requestSchemaView.id,
         },
       ),
     );
@@ -1022,6 +1037,7 @@ function renderResponseTabs(state) {
     state.activeResponseTab = "live-response";
   }
 
+  state.responseTabsElement.setAttribute("role", "tablist");
   state.responseTabsElement.replaceChildren();
   tabs.forEach((tab) => {
     state.responseTabsElement.appendChild(
@@ -1048,12 +1064,15 @@ function renderResponseTabs(state) {
             tab.error,
           );
         },
+        {
+          controlsId: state.outputElement.id,
+        },
       ),
     );
   });
 }
 
-function setLiveResponseOutput(state, rawText, isError = false) {
+function updateLiveResponse(state, rawText, isError = false) {
   state.liveResponseText = String(rawText || "");
   state.liveResponseIsError = Boolean(isError);
   if (state.activeResponseTab !== "live-response") {
@@ -1564,26 +1583,26 @@ export function createPlaygroundSystem({
       const data = await parseJsonSafe(response);
 
       if (response.ok && data.success) {
-        setLiveResponseOutput(state, data.output, false);
+        updateLiveResponse(state, data.output, false);
         setResponseMetadata(state, data.metadata);
         return;
       }
 
       const errorText = data.error || "Request failed";
-      setLiveResponseOutput(state, `Error: ${errorText}`, true);
+      updateLiveResponse(state, `Error: ${errorText}`, true);
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
       }
       if (error.code === "UNAUTHORIZED") {
-        setLiveResponseOutput(
+        updateLiveResponse(
           state,
           "Error: Unauthorized. Enter password to continue.",
           true,
         );
         return;
       }
-      setLiveResponseOutput(state, `Error: ${error.message}`, true);
+      updateLiveResponse(state, `Error: ${error.message}`, true);
     } finally {
       if (state.activeRunController === runController) {
         state.activeRunController = null;
@@ -1618,7 +1637,7 @@ export function createPlaygroundSystem({
       if (!response.ok) {
         const data = await parseJsonSafe(response);
         const errorText = data.error || "Request failed";
-        setLiveResponseOutput(state, `Error: ${errorText}`, true);
+        updateLiveResponse(state, `Error: ${errorText}`, true);
         return;
       }
 
@@ -1629,13 +1648,13 @@ export function createPlaygroundSystem({
 
       if (/application\/json/i.test(contentType)) {
         const data = await parseJsonSafe(response);
-        setLiveResponseOutput(state, data.output || "", false);
+        updateLiveResponse(state, data.output || "", false);
         return;
       }
 
       if (!responseBody?.getReader) {
         const data = await parseJsonSafe(response);
-        setLiveResponseOutput(state, data.output || "", false);
+        updateLiveResponse(state, data.output || "", false);
         return;
       }
 
@@ -1662,14 +1681,14 @@ export function createPlaygroundSystem({
         return;
       }
       if (error.code === "UNAUTHORIZED") {
-        setLiveResponseOutput(
+        updateLiveResponse(
           state,
           "Error: Unauthorized. Enter password to continue.",
           true,
         );
         return;
       }
-      setLiveResponseOutput(state, `Error: ${error.message}`, true);
+      updateLiveResponse(state, `Error: ${error.message}`, true);
     } finally {
       if (state.activeRunController === runController) {
         state.activeRunController = null;
@@ -1782,6 +1801,8 @@ export function createPlaygroundSystem({
     const requestSchemaView = playground.querySelector(".requestSchemaView");
     const outputElement = playground.querySelector(".curlOutput");
     const responseTabsElement = playground.querySelector(".responseTabs");
+    requestSchemaView.id = `${playgroundId}-request-schema-view`;
+    outputElement.id = `${playgroundId}-response-view`;
     const responseMetaButton = playground.querySelector(".responseMetaBtn");
     const responseMetaToast = playground.querySelector(".responseMetaToast");
     const copyButton = playground.querySelector(".copyBtn");
