@@ -326,6 +326,7 @@ function createElement(tagName, className = "", textContent = "") {
 function buildPlaygroundMarkup(container) {
   const requestPane = createElement("section", "playgroundPane");
   const requestHeader = createElement("div", "panelHeader", "Request");
+  const requestTabs = createElement("div", "doccurlTabs requestTabs");
   const requestPaneBody = createElement("div", "requestPaneBody");
   const requestEditorView = createElement("div", "requestEditorView");
   const requestWrapper = createElement("div", "curlScriptWrapper");
@@ -354,6 +355,8 @@ function buildPlaygroundMarkup(container) {
   );
   uploadToggleButton.hidden = true;
   const runButton = createElement("button", "runBtn", "Run");
+  const requestSchemaView = createElement("div", "schemaView requestSchemaView");
+  requestSchemaView.hidden = true;
 
   overlay.appendChild(overlayCode);
   editorShell.append(overlay, editor);
@@ -364,8 +367,8 @@ function buildPlaygroundMarkup(container) {
   requestActions.appendChild(uploadToggleButton);
   requestActions.appendChild(runButton);
   requestEditorView.append(requestWrapper, requestActions);
-  requestPaneBody.append(requestEditorView, uploadPanel);
-  requestPane.append(requestHeader, requestPaneBody);
+  requestPaneBody.append(requestEditorView, requestSchemaView, uploadPanel);
+  requestPane.append(requestHeader, requestTabs, requestPaneBody);
 
   const responsePane = createElement("section", "playgroundPane responsePane");
   const responseHeader = createElement("div", "panelHeader responseHeader");
@@ -376,6 +379,7 @@ function buildPlaygroundMarkup(container) {
     "Details",
   );
   responseMetaButton.disabled = true;
+  const responseTabs = createElement("div", "doccurlTabs responseTabs");
   const responseToast = createElement("div", "responseMetaToast");
   const output = createElement("div", "curlOutput");
   const outputEmpty = createElement(
@@ -393,7 +397,7 @@ function buildPlaygroundMarkup(container) {
   responseHeader.append(responseLabel, responseMetaButton);
   output.appendChild(outputEmpty);
   responseActions.appendChild(fullscreenButton);
-  responsePane.append(responseHeader, responseToast, output, responseActions);
+  responsePane.append(responseHeader, responseTabs, responseToast, output, responseActions);
 
   container.append(requestPane, responsePane);
 }
@@ -590,6 +594,86 @@ test("copy button uses current env values and current editor text", async () => 
     assert.deepEqual(copyCalls[0].env, {
       BASE_URL: "https://api.example.com",
     });
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});
+
+test("curl schema flags render request and response schema tabs", () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  const documentRef = createDocument();
+  const windowRef = createWindow();
+  global.document = documentRef;
+  global.window = windowRef;
+
+  try {
+    const docContent = new MockElement("div");
+    docContent.appendChild(
+      createCurlBlock(
+        `curl https://api.example.com/users --request-schema '{"query":{"page":{"type":"integer"}},"headers":{"x-api-key":{"type":"string"}},"body":{"name":{"type":"string"}}}' --response-schema 200 '{"users":"User[]"}' --response-schema 401 '{"message":"Unauthorized"}'`,
+      ),
+    );
+
+    const playgroundSystem = createPlaygroundSystem({
+      docContent,
+      fullscreenModal: new MockElement("div"),
+      fullscreenMount: new MockElement("div"),
+      apiFetch: async () => ({ ok: true }),
+      parseJsonSafe: async () => ({}),
+      withBasePath: (value) => value,
+      envManager: {
+        getCurrentEnv: () => ({}),
+      },
+      documentRef,
+      windowRef,
+    });
+
+    playgroundSystem.initializeCurlPlaygrounds("guide.md");
+
+    const requestTabLabels = docContent
+      .querySelectorAll(".requestTabs .doccurlTabBtn")
+      .map((element) => element.textContent);
+    const responseTabLabels = docContent
+      .querySelectorAll(".responseTabs .doccurlTabBtn")
+      .map((element) => element.textContent);
+
+    assert.deepEqual(requestTabLabels, [
+      "Curl",
+      "Request Schema",
+      "Query Params",
+      "Headers",
+      "Body",
+    ]);
+    assert.deepEqual(responseTabLabels, [
+      "Live Response",
+      "Response 200",
+      "Response 401",
+    ]);
+
+    const requestSchemaTab = docContent
+      .querySelectorAll(".requestTabs .doccurlTabBtn")
+      .find((element) => element.textContent === "Request Schema");
+    requestSchemaTab.click();
+
+    const requestSchemaView = docContent.querySelector(".requestSchemaView");
+    assert.equal(requestSchemaView.hidden, false);
+    assert.match(
+      requestSchemaView.querySelector("code").textContent,
+      /"query"/,
+    );
+
+    const responseSchemaTab = docContent
+      .querySelectorAll(".responseTabs .doccurlTabBtn")
+      .find((element) => element.textContent === "Response 401");
+    responseSchemaTab.click();
+
+    assert.match(
+      docContent.querySelector(".curlOutput code").textContent,
+      /Unauthorized/,
+    );
   } finally {
     global.document = previousDocument;
     global.window = previousWindow;

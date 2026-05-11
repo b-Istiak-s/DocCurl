@@ -275,6 +275,20 @@ test("parseCurlCommand rejects unsupported flags", () => {
   );
 });
 
+test("parseCurlCommand ignores DocCurl schema extension flags", () => {
+  const parsed = parseCurlCommand(
+    `curl https://api.example.com/users --request-schema '{"query":{"page":{"type":"integer"}}}' --response-schema 200 '{"users":"User[]"}' --response-schema 401 '{"message":"Unauthorized"}' -H "Authorization: Bearer token"`,
+  );
+
+  assert.equal(parsed.method, "GET");
+  assert.equal(parsed.url, "https://api.example.com/users");
+  assert.deepEqual(parsed.headers, [
+    { name: "Authorization", value: "Bearer token" },
+  ]);
+  assert.equal(parsed.body, "");
+  assert.deepEqual(parsed.formParts, []);
+});
+
 test("parseSoccliCommand normalizes validation and tokenizer errors", () => {
   assert.throws(() => parseSoccliCommand(""), /soccli: invalid command/i);
   assert.throws(

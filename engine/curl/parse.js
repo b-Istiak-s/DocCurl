@@ -2,6 +2,63 @@ import { ALLOWED_METHODS, DATA_FLAGS, FORM_FLAGS } from "./constants.js";
 import { tokenizeCommand } from "./tokenize.js";
 import { parseMultipartFormPart } from "./uploads/parse.js";
 
+const DOCCURL_REQUEST_SCHEMA_FLAG = "--request-schema";
+const DOCCURL_RESPONSE_SCHEMA_FLAG = "--response-schema";
+
+function stripDoccurlSchemaTokens(tokens) {
+  const executableTokens = [];
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+
+    if (token === DOCCURL_REQUEST_SCHEMA_FLAG) {
+      if (!tokens[i + 1]) {
+        throw new Error(`Missing value for ${DOCCURL_REQUEST_SCHEMA_FLAG}`);
+      }
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`)) {
+      const schemaValue = token.slice(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`.length);
+      if (!schemaValue) {
+        throw new Error(`Missing value for ${DOCCURL_REQUEST_SCHEMA_FLAG}`);
+      }
+      continue;
+    }
+
+    if (token === DOCCURL_RESPONSE_SCHEMA_FLAG) {
+      const statusCode = tokens[i + 1];
+      const schemaValue = tokens[i + 2];
+      if (!statusCode) {
+        throw new Error(`Missing status code for ${DOCCURL_RESPONSE_SCHEMA_FLAG}`);
+      }
+      if (!schemaValue) {
+        throw new Error(`Missing schema for ${DOCCURL_RESPONSE_SCHEMA_FLAG}`);
+      }
+      i += 2;
+      continue;
+    }
+
+    if (token.startsWith(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`)) {
+      const statusCode = token.slice(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`.length);
+      const schemaValue = tokens[i + 1];
+      if (!statusCode) {
+        throw new Error(`Missing status code for ${DOCCURL_RESPONSE_SCHEMA_FLAG}`);
+      }
+      if (!schemaValue) {
+        throw new Error(`Missing schema for ${DOCCURL_RESPONSE_SCHEMA_FLAG}`);
+      }
+      i += 1;
+      continue;
+    }
+
+    executableTokens.push(token);
+  }
+
+  return executableTokens;
+}
+
 export function parseHeader(rawHeader) {
   if (typeof rawHeader !== "string" || !rawHeader.includes(":")) {
     throw new Error(`Invalid header format: ${String(rawHeader)}`);
@@ -19,7 +76,7 @@ export function parseHeader(rawHeader) {
 }
 
 export function parseCurlCommand(command) {
-  const tokens = tokenizeCommand(command);
+  const tokens = stripDoccurlSchemaTokens(tokenizeCommand(command));
   if (tokens[0] !== "curl") {
     throw new Error("Command must start with curl");
   }

@@ -565,6 +565,38 @@ body.auth-locked {
   word-break: break-word;
 }
 
+.doccurlTabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  background: rgba(8, 16, 29, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.doccurlTabBtn {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.7);
+  color: #c6d2e3;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.doccurlTabBtn:hover {
+  border-color: rgba(148, 196, 240, 0.8);
+}
+
+.doccurlTabBtn.is-active {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.7);
+  color: #e2f8f4;
+}
+
 .curlPlaygroundInline,
 .soccliPlaygroundInline {
   position: relative;
@@ -611,6 +643,23 @@ body.auth-locked {
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.schemaView {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  background: radial-gradient(circle at top right, #1e293b 0%, #0f172a 100%);
+  color: #e2e8f0;
+  font-family: var(--curl-editor-font-family);
+  font-size: var(--curl-editor-font-size);
+  line-height: var(--curl-editor-line-height);
+  box-shadow: inset 0 2px 20px rgba(0, 0, 0, 0.2);
+}
+
+.schemaView pre {
+  margin: 0;
 }
 
 .curlScriptWrapper {

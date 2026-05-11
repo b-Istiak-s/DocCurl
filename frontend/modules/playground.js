@@ -12,6 +12,8 @@ const UPLOAD_LIMITS = {
   maxFileBytes: 10 * 1024 * 1024,
   maxTotalBytes: 25 * 1024 * 1024,
 };
+const DOCCURL_REQUEST_SCHEMA_FLAG = "--request-schema";
+const DOCCURL_RESPONSE_SCHEMA_FLAG = "--response-schema";
 
 function hashString(value) {
   let hash = 2166136261;
@@ -290,6 +292,121 @@ function formatDataLines(dataToken) {
     lines.push(`  ${jsonLines[i]}${isLast ? "' \\" : ""}`);
   }
   return lines;
+}
+
+function parseJsonSchemaToken(rawValue) {
+  const normalizedRaw = String(rawValue || "").trim();
+  if (!normalizedRaw) {
+    return {
+      raw: normalizedRaw,
+      value: null,
+      error: "Schema cannot be empty",
+    };
+  }
+
+  try {
+    return {
+      raw: normalizedRaw,
+      value: JSON.parse(normalizedRaw),
+      error: "",
+    };
+  } catch {
+    return {
+      raw: normalizedRaw,
+      value: null,
+      error: "Schema must be valid JSON",
+    };
+  }
+}
+
+function parseDoccurlSchemaMetadata(command) {
+  let tokens = [];
+
+  try {
+    tokens = tokenizeShell(String(command || ""));
+  } catch {
+    return {
+      requestSchema: null,
+      requestSchemaRaw: "",
+      requestSchemaError: "",
+      responseSchemas: [],
+    };
+  }
+
+  if (!tokens.length || tokens[0] !== "curl") {
+    return {
+      requestSchema: null,
+      requestSchemaRaw: "",
+      requestSchemaError: "",
+      responseSchemas: [],
+    };
+  }
+
+  let requestSchema = null;
+  let requestSchemaRaw = "";
+  let requestSchemaError = "";
+  const responseSchemas = [];
+
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+
+    if (token === DOCCURL_REQUEST_SCHEMA_FLAG) {
+      const parsed = parseJsonSchemaToken(tokens[i + 1] || "");
+      requestSchema = parsed.value;
+      requestSchemaRaw = parsed.raw;
+      requestSchemaError = parsed.error;
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`)) {
+      const parsed = parseJsonSchemaToken(
+        token.slice(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`.length),
+      );
+      requestSchema = parsed.value;
+      requestSchemaRaw = parsed.raw;
+      requestSchemaError = parsed.error;
+      continue;
+    }
+
+    if (token === DOCCURL_RESPONSE_SCHEMA_FLAG) {
+      const statusCode = String(tokens[i + 1] || "").trim();
+      const parsed = parseJsonSchemaToken(tokens[i + 2] || "");
+      if (statusCode) {
+        responseSchemas.push({
+          statusCode,
+          schema: parsed.value,
+          raw: parsed.raw,
+          error: parsed.error,
+        });
+      }
+      i += 2;
+      continue;
+    }
+
+    if (token.startsWith(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`)) {
+      const statusCode = token
+        .slice(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`.length)
+        .trim();
+      const parsed = parseJsonSchemaToken(tokens[i + 1] || "");
+      if (statusCode) {
+        responseSchemas.push({
+          statusCode,
+          schema: parsed.value,
+          raw: parsed.raw,
+          error: parsed.error,
+        });
+      }
+      i += 1;
+    }
+  }
+
+  return {
+    requestSchema,
+    requestSchemaRaw,
+    requestSchemaError,
+    responseSchemas,
+  };
 }
 
 function parseMultipartFieldDefinition(rawValue) {
@@ -739,6 +856,209 @@ function renderEmpty(outputElement) {
     '<div class="outputEmpty">Run a command to see the response</div>';
 }
 
+function formatSchemaContent(schema, rawSchema, errorMessage) {
+  if (errorMessage) {
+    return rawSchema
+      ? `Error: ${errorMessage}\n\n${rawSchema}`
+      : `Error: ${errorMessage}`;
+  }
+  if (schema == null) {
+    return "{}";
+  }
+  return JSON.stringify(schema, null, 2);
+}
+
+function renderSchemaOutput(containerElement, schema, rawSchema, errorMessage) {
+  const displayText = formatSchemaContent(schema, rawSchema, errorMessage);
+  const language = errorMessage ? "plaintext" : "json";
+  containerElement.innerHTML = "";
+  const preElement = document.createElement("pre");
+  const codeElement = document.createElement("code");
+  codeElement.textContent = displayText;
+  codeElement.className = `language-${language}`;
+  if (errorMessage) {
+    codeElement.classList.add("outputError");
+  }
+  preElement.appendChild(codeElement);
+  containerElement.appendChild(preElement);
+  highlightCodeElement(codeElement, language);
+}
+
+function createTabButton(documentRef, className, label, active, onClick) {
+  const button = documentRef.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.classList.toggle("is-active", active);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function getRequestSchemaTabs(schemaMetadata) {
+  const tabs = [
+    {
+      id: "curl",
+      label: "Curl",
+    },
+  ];
+
+  if (schemaMetadata?.requestSchemaRaw || schemaMetadata?.requestSchema) {
+    tabs.push({
+      id: "request-schema",
+      label: "Request Schema",
+      schema: schemaMetadata.requestSchema,
+      raw: schemaMetadata.requestSchemaRaw,
+      error: schemaMetadata.requestSchemaError,
+    });
+  }
+
+  const requestSchema = schemaMetadata?.requestSchema;
+  if (requestSchema && typeof requestSchema === "object") {
+    const sections = [
+      ["query", "Query Params"],
+      ["headers", "Headers"],
+      ["body", "Body"],
+      ["path", "Path Params"],
+    ];
+
+    sections.forEach(([key, label]) => {
+      if (!(key in requestSchema)) {
+        return;
+      }
+      tabs.push({
+        id: `request-${key}`,
+        label,
+        schema: requestSchema[key],
+        raw: JSON.stringify(requestSchema[key] ?? {}, null, 2),
+        error: "",
+      });
+    });
+  }
+
+  return tabs;
+}
+
+function getResponseSchemaTabs(schemaMetadata) {
+  const tabs = [
+    {
+      id: "live-response",
+      label: "Live Response",
+    },
+  ];
+
+  const responseSchemas = [...(schemaMetadata?.responseSchemas || [])].sort(
+    (left, right) => Number(left.statusCode) - Number(right.statusCode),
+  );
+
+  responseSchemas.forEach((entry) => {
+    tabs.push({
+      id: `response-${entry.statusCode}`,
+      label: `Response ${entry.statusCode}`,
+      schema: entry.schema,
+      raw: entry.raw,
+      error: entry.error,
+    });
+  });
+
+  return tabs;
+}
+
+function syncRequestContentVisibility(state) {
+  const onCurlTab = state.activeRequestTab === "curl";
+  state.requestSchemaView.hidden = onCurlTab;
+  if (onCurlTab) {
+    syncUploadUI(state);
+    return;
+  }
+  state.requestEditorView.hidden = true;
+  state.uploadPanel.hidden = true;
+}
+
+function renderRequestTabs(state) {
+  const tabs = getRequestSchemaTabs(state.schemaMetadata);
+  if (!tabs.some((tab) => tab.id === state.activeRequestTab)) {
+    state.activeRequestTab = "curl";
+  }
+
+  state.requestTabsElement.replaceChildren();
+  tabs.forEach((tab) => {
+    state.requestTabsElement.appendChild(
+      createTabButton(
+        state.documentRef,
+        "doccurlTabBtn",
+        tab.label,
+        tab.id === state.activeRequestTab,
+        () => {
+          state.activeRequestTab = tab.id;
+          renderRequestTabs(state);
+          syncRequestContentVisibility(state);
+        },
+      ),
+    );
+  });
+
+  const activeTab = tabs.find((tab) => tab.id === state.activeRequestTab);
+  if (activeTab && activeTab.id !== "curl") {
+    renderSchemaOutput(
+      state.requestSchemaView,
+      activeTab.schema,
+      activeTab.raw,
+      activeTab.error,
+    );
+  } else {
+    state.requestSchemaView.replaceChildren();
+  }
+
+  syncRequestContentVisibility(state);
+}
+
+function renderResponseTabs(state) {
+  const tabs = getResponseSchemaTabs(state.schemaMetadata);
+  if (!tabs.some((tab) => tab.id === state.activeResponseTab)) {
+    state.activeResponseTab = "live-response";
+  }
+
+  state.responseTabsElement.replaceChildren();
+  tabs.forEach((tab) => {
+    state.responseTabsElement.appendChild(
+      createTabButton(
+        state.documentRef,
+        "doccurlTabBtn",
+        tab.label,
+        tab.id === state.activeResponseTab,
+        () => {
+          state.activeResponseTab = tab.id;
+          renderResponseTabs(state);
+          if (tab.id === "live-response") {
+            renderResponseOutput(
+              state.outputElement,
+              state.liveResponseText,
+              state.liveResponseIsError,
+            );
+            return;
+          }
+          renderSchemaOutput(
+            state.outputElement,
+            tab.schema,
+            tab.raw,
+            tab.error,
+          );
+        },
+      ),
+    );
+  });
+}
+
+function setLiveResponseOutput(state, rawText, isError = false) {
+  state.liveResponseText = String(rawText || "");
+  state.liveResponseIsError = Boolean(isError);
+  if (state.activeResponseTab !== "live-response") {
+    return;
+  }
+  renderResponseOutput(state.outputElement, state.liveResponseText, isError);
+}
+
 function normalizeResponseMetadata(metadata) {
   if (!metadata || typeof metadata !== "object") {
     return null;
@@ -937,9 +1257,16 @@ export function createPlaygroundSystem({
     state.selectedUploadFiles.clear();
     state.uploadValidationMessage = "";
     state.isUploadPanelOpen = false;
+    state.activeRequestTab = "curl";
+    state.activeResponseTab = "live-response";
+    state.liveResponseText = "";
+    state.liveResponseIsError = false;
+    state.schemaMetadata = parseDoccurlSchemaMetadata(state.originalTemplate);
     state.multipartMetadata = parseCurlMultipartMetadata(
       state.originalTemplate,
     );
+    renderRequestTabs(state);
+    renderResponseTabs(state);
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
     syncUploadUI(state);
@@ -1096,6 +1423,12 @@ export function createPlaygroundSystem({
     state.editorElement.blur?.();
     renderUploadRows(state);
     setUploadValidationMessage(state, state.uploadValidationMessage);
+
+    if (state.activeRequestTab && state.activeRequestTab !== "curl") {
+      state.requestEditorView.hidden = true;
+      state.uploadPanel.hidden = true;
+      state.requestSchemaView.hidden = false;
+    }
   }
 
   function syncMultipartState(state) {
@@ -1113,6 +1446,30 @@ export function createPlaygroundSystem({
 
   function isSoccliState(state) {
     return state.commandKind === "soccli";
+  }
+
+  function refreshDoccurlSchemas(state) {
+    if (isSoccliState(state)) {
+      return;
+    }
+
+    state.schemaMetadata = parseDoccurlSchemaMetadata(state.editorElement.value || "");
+    renderRequestTabs(state);
+    renderResponseTabs(state);
+
+    if (state.activeResponseTab !== "live-response") {
+      const tabEntry = getResponseSchemaTabs(state.schemaMetadata).find(
+        (tab) => tab.id === state.activeResponseTab,
+      );
+      if (tabEntry) {
+        renderSchemaOutput(
+          state.outputElement,
+          tabEntry.schema,
+          tabEntry.raw,
+          tabEntry.error,
+        );
+      }
+    }
   }
 
   function buildRunRequest(command, state) {
@@ -1204,26 +1561,26 @@ export function createPlaygroundSystem({
       const data = await parseJsonSafe(response);
 
       if (response.ok && data.success) {
-        renderResponseOutput(state.outputElement, data.output);
+        setLiveResponseOutput(state, data.output, false);
         setResponseMetadata(state, data.metadata);
         return;
       }
 
       const errorText = data.error || "Request failed";
-      renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
+      setLiveResponseOutput(state, `Error: ${errorText}`, true);
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
       }
       if (error.code === "UNAUTHORIZED") {
-        showOutputMessage(
-          state.outputElement,
+        setLiveResponseOutput(
+          state,
           "Error: Unauthorized. Enter password to continue.",
           true,
         );
         return;
       }
-      showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+      setLiveResponseOutput(state, `Error: ${error.message}`, true);
     } finally {
       if (state.activeRunController === runController) {
         state.activeRunController = null;
@@ -1258,7 +1615,7 @@ export function createPlaygroundSystem({
       if (!response.ok) {
         const data = await parseJsonSafe(response);
         const errorText = data.error || "Request failed";
-        renderResponseOutput(state.outputElement, `Error: ${errorText}`, true);
+        setLiveResponseOutput(state, `Error: ${errorText}`, true);
         return;
       }
 
@@ -1269,13 +1626,13 @@ export function createPlaygroundSystem({
 
       if (/application\/json/i.test(contentType)) {
         const data = await parseJsonSafe(response);
-        renderResponseOutput(state.outputElement, data.output || "", false);
+        setLiveResponseOutput(state, data.output || "", false);
         return;
       }
 
       if (!responseBody?.getReader) {
         const data = await parseJsonSafe(response);
-        renderResponseOutput(state.outputElement, data.output || "", false);
+        setLiveResponseOutput(state, data.output || "", false);
         return;
       }
 
@@ -1295,19 +1652,21 @@ export function createPlaygroundSystem({
 
       received += decoder.decode();
       outputCode.textContent = received;
+      state.liveResponseText = received;
+      state.liveResponseIsError = false;
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
       }
       if (error.code === "UNAUTHORIZED") {
-        showOutputMessage(
-          state.outputElement,
+        setLiveResponseOutput(
+          state,
           "Error: Unauthorized. Enter password to continue.",
           true,
         );
         return;
       }
-      showOutputMessage(state.outputElement, `Error: ${error.message}`, true);
+      setLiveResponseOutput(state, `Error: ${error.message}`, true);
     } finally {
       if (state.activeRunController === runController) {
         state.activeRunController = null;
@@ -1326,6 +1685,9 @@ export function createPlaygroundSystem({
     if (state.activeRunController) {
       state.activeRunController.abort();
     }
+    state.activeResponseTab = "live-response";
+    renderResponseTabs(state);
+    renderLoading(state.outputElement);
     const runController = new AbortController();
     state.activeRunController = runController;
     const runPath =
@@ -1366,6 +1728,7 @@ export function createPlaygroundSystem({
     playground.innerHTML = `
       <section class="playgroundPane">
         <div class="panelHeader">${isSoccli ? "Soccli Command" : "Request"}</div>
+        <div class="doccurlTabs requestTabs"></div>
         <div class="requestPaneBody">
           <div class="requestEditorView">
             <div class="curlScriptWrapper">
@@ -1380,6 +1743,7 @@ export function createPlaygroundSystem({
               <button type="button" class="runBtn">Run</button>
             </div>
           </div>
+          <div class="schemaView requestSchemaView" hidden></div>
           <div class="curlUploadPanel" hidden>
             <div class="curlUploadError" hidden></div>
             <div class="curlUploadList"></div>
@@ -1395,6 +1759,7 @@ export function createPlaygroundSystem({
           <span>Response</span>
           <button type="button" class="responseMetaBtn" disabled>Details</button>
         </div>
+        <div class="doccurlTabs responseTabs"></div>
         <div class="responseMetaToast" role="status" aria-live="polite"></div>
         <div class="curlOutput">
           <div class="outputEmpty">Run a command to see the response</div>
@@ -1410,7 +1775,10 @@ export function createPlaygroundSystem({
     const editorShell = playground.querySelector(".curlEditorShell");
     const overlayElement = playground.querySelector(".curlOverlay");
     const overlayCode = overlayElement.querySelector("code");
+    const requestTabsElement = playground.querySelector(".requestTabs");
+    const requestSchemaView = playground.querySelector(".requestSchemaView");
     const outputElement = playground.querySelector(".curlOutput");
+    const responseTabsElement = playground.querySelector(".responseTabs");
     const responseMetaButton = playground.querySelector(".responseMetaBtn");
     const responseMetaToast = playground.querySelector(".responseMetaToast");
     const copyButton = playground.querySelector(".copyBtn");
@@ -1448,6 +1816,14 @@ export function createPlaygroundSystem({
       fullscreenButton,
       originalTemplate,
       commandKind,
+      schemaMetadata: parseDoccurlSchemaMetadata(editorElement.value || ""),
+      requestTabsElement,
+      responseTabsElement,
+      requestSchemaView,
+      activeRequestTab: "curl",
+      activeResponseTab: "live-response",
+      liveResponseText: "",
+      liveResponseIsError: false,
       multipartMetadata: parseCurlMultipartMetadata(editorElement.value || ""),
       selectedUploadFiles: new Map(),
       isUploadPanelOpen: false,
@@ -1467,8 +1843,12 @@ export function createPlaygroundSystem({
       uploadHideButton.hidden = true;
       responseMetaButton.hidden = true;
       responseMetaToast.hidden = true;
+      requestTabsElement.hidden = true;
+      responseTabsElement.hidden = true;
     }
 
+    renderRequestTabs(state);
+    renderResponseTabs(state);
     syncCurlOverlay(state, { highlight: true });
     syncCurlOverlayScroll(state);
     syncUploadUI(state);
@@ -1479,6 +1859,7 @@ export function createPlaygroundSystem({
       syncCurlOverlayScroll(state);
       if (!isSoccliState(state)) {
         syncMultipartState(state);
+        refreshDoccurlSchemas(state);
       }
       persistEditorValue(state);
     });
@@ -1493,6 +1874,7 @@ export function createPlaygroundSystem({
       syncCurlOverlayScroll(state);
       if (!isSoccliState(state)) {
         syncMultipartState(state);
+        refreshDoccurlSchemas(state);
       }
       persistEditorValue(state);
     });
