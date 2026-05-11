@@ -968,11 +968,14 @@ function syncRequestContentVisibility(state) {
   const onCurlTab = state.activeRequestTab === "curl";
   state.requestSchemaView.hidden = onCurlTab;
   if (onCurlTab) {
-    syncUploadUI(state);
+    state.requestEditorView.hidden = Boolean(state.isUploadPanelOpen);
+    state.uploadPanel.hidden = !state.isUploadPanelOpen;
+    state.editorElement.disabled = Boolean(state.isUploadPanelOpen);
     return;
   }
   state.requestEditorView.hidden = true;
   state.uploadPanel.hidden = true;
+  state.editorElement.disabled = false;
 }
 
 function renderRequestTabs(state) {
