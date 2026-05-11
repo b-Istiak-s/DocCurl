@@ -930,7 +930,7 @@ function getRequestSchemaTabs(schemaMetadata) {
         id: `request-${key}`,
         label,
         schema: requestSchema[key],
-        raw: JSON.stringify(requestSchema[key] ?? {}, null, 2),
+        raw: JSON.stringify(requestSchema[key], null, 2),
         error: "",
       });
     });
