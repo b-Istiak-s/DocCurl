@@ -20,7 +20,9 @@ function stripDoccurlSchemaTokens(tokens) {
     }
 
     if (token.startsWith(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`)) {
-      const schemaValue = token.slice(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`.length);
+      const schemaValue = token
+        .slice(`${DOCCURL_REQUEST_SCHEMA_FLAG}=`.length)
+        .trim();
       if (!schemaValue) {
         throw new Error(`Missing value for ${DOCCURL_REQUEST_SCHEMA_FLAG}`);
       }
@@ -41,7 +43,9 @@ function stripDoccurlSchemaTokens(tokens) {
     }
 
     if (token.startsWith(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`)) {
-      const statusCode = token.slice(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`.length);
+      const statusCode = token
+        .slice(`${DOCCURL_RESPONSE_SCHEMA_FLAG}=`.length)
+        .trim();
       const schemaValue = tokens[i + 1];
       if (!statusCode) {
         throw new Error(`Missing status code for ${DOCCURL_RESPONSE_SCHEMA_FLAG}`);

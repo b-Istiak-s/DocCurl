@@ -310,11 +310,13 @@ function parseJsonSchemaToken(rawValue) {
       value: JSON.parse(normalizedRaw),
       error: "",
     };
-  } catch {
+  } catch (error) {
+    const errorDetail =
+      error && typeof error.message === "string" ? `: ${error.message}` : "";
     return {
       raw: normalizedRaw,
       value: null,
-      error: "Schema must be valid JSON",
+      error: `Schema must be valid JSON${errorDetail}`,
     };
   }
 }
@@ -959,7 +961,23 @@ function getResponseSchemaTabs(schemaMetadata) {
   ];
 
   const responseSchemas = [...(schemaMetadata?.responseSchemas || [])].sort(
-    (left, right) => Number(left.statusCode) - Number(right.statusCode),
+    (left, right) => {
+      const leftCode = Number.parseInt(left.statusCode, 10);
+      const rightCode = Number.parseInt(right.statusCode, 10);
+      const leftIsNumeric = Number.isFinite(leftCode);
+      const rightIsNumeric = Number.isFinite(rightCode);
+
+      if (leftIsNumeric && rightIsNumeric) {
+        return leftCode - rightCode;
+      }
+      if (leftIsNumeric) {
+        return -1;
+      }
+      if (rightIsNumeric) {
+        return 1;
+      }
+      return String(left.statusCode).localeCompare(String(right.statusCode));
+    },
   );
 
   responseSchemas.forEach((entry) => {
