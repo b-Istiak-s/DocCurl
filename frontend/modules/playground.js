@@ -295,10 +295,10 @@ function formatDataLines(dataToken) {
 }
 
 function parseJsonSchemaToken(rawValue) {
-  const normalizedRaw = String(rawValue || "").trim();
-  if (!normalizedRaw) {
+  const trimmedRaw = String(rawValue || "").trim();
+  if (!trimmedRaw) {
     return {
-      raw: normalizedRaw,
+      raw: trimmedRaw,
       value: null,
       error: "Schema cannot be empty",
     };
@@ -306,15 +306,15 @@ function parseJsonSchemaToken(rawValue) {
 
   try {
     return {
-      raw: normalizedRaw,
-      value: JSON.parse(normalizedRaw),
+      raw: trimmedRaw,
+      value: JSON.parse(trimmedRaw),
       error: "",
     };
   } catch (error) {
     const errorDetail =
       error && typeof error.message === "string" ? `: ${error.message}` : "";
     return {
-      raw: normalizedRaw,
+      raw: trimmedRaw,
       value: null,
       error: `Schema must be valid JSON${errorDetail}`,
     };
@@ -864,7 +864,7 @@ function formatSchemaContent(schema, rawSchema, errorMessage) {
       ? `Error: ${errorMessage}\n\n${rawSchema}`
       : `Error: ${errorMessage}`;
   }
-  if (schema == null) {
+  if (schema === null || schema === undefined) {
     return "{}";
   }
   return JSON.stringify(schema, null, 2);
@@ -1820,7 +1820,9 @@ export function createPlaygroundSystem({
     const outputElement = playground.querySelector(".curlOutput");
     const responseTabsElement = playground.querySelector(".responseTabs");
     requestSchemaView.id = `${playgroundId}-request-schema-view`;
+    requestSchemaView.setAttribute("role", "tabpanel");
     outputElement.id = `${playgroundId}-response-view`;
+    outputElement.setAttribute("role", "tabpanel");
     const responseMetaButton = playground.querySelector(".responseMetaBtn");
     const responseMetaToast = playground.querySelector(".responseMetaToast");
     const copyButton = playground.querySelector(".copyBtn");
