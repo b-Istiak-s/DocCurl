@@ -17,6 +17,20 @@ export function validateHeader(header) {
   }
 }
 
+export function validateSchema(schema, { name, limits = LIMITS, maxField = "maxSchemaBytes" } = {}) {
+  if (schema == null) {
+    return;
+  }
+  if (typeof schema !== "object" || Array.isArray(schema)) {
+    throw new Error(`Invalid ${name}: must be a JSON object.`);
+  }
+  const limit = limits[maxField] || limits.maxSchemaBytes;
+  const serialized = JSON.stringify(schema);
+  if (serialized.length > limit) {
+    throw new Error(`${name} exceeds ${limit} bytes (${serialized.length}).`);
+  }
+}
+
 export function validateRequestSpec(spec) {
   if (!ALLOWED_METHODS.has(spec.method)) {
     throw new Error(`Invalid HTTP method: ${spec.method}`);
@@ -79,4 +93,8 @@ export function validateRequestSpec(spec) {
   if (spec.formParts.length > 0 && !BODY_METHODS.has(spec.method)) {
     throw new Error(`HTTP ${spec.method} cannot be used with multipart form data`);
   }
+
+  validateSchema(spec.requestSchema, { name: "Request schema" });
+  validateSchema(spec.responseSchema, { name: "Response schema" });
+  validateSchema(spec.fieldDescriptions, { name: "Field descriptions", maxField: "maxDescriptionsBytes" });
 }

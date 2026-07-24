@@ -19,6 +19,12 @@ export const DATA_FLAGS = new Set([
 
 export const FORM_FLAGS = new Set(["-F", "--form"]);
 
+export const DOCCURL_SCHEMA_FLAGS = new Set([
+  "--doccurl-request-schema",
+  "--doccurl-response-schema",
+  "--doccurl-field-descriptions",
+]);
+
 export const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "host.docker.internal",
@@ -68,6 +74,8 @@ export const LIMITS = {
   maxUploadTotalBytes: 25 * 1024 * 1024,
   maxOutputBytes: 1024 * 1024,
   requestTimeoutMs: 5_000,
+  maxSchemaBytes: 16 * 1024,
+  maxDescriptionsBytes: 16 * 1024,
 };
 
 export const CURL_RESPONSE_META_START = "__DOCCURL_META_START__";

@@ -15,6 +15,7 @@ import {
   setupCurlRoutes,
   setupSoccliRoutes,
   parseCurlCommand,
+  validateRequestSpec,
   validateTargetUrl,
 } from "../../engine/index.js";
 import { parseSoccliCommand } from "../../engine/soccli/command.js";
@@ -273,6 +274,151 @@ test("parseCurlCommand rejects unsupported flags", () => {
       ),
     /Unsupported flag/i,
   );
+});
+
+test("parseCurlCommand extracts --doccurl-request-schema and --doccurl-response-schema", () => {
+  const command =
+    'curl https://api.example.com/x ' +
+    '--doccurl-request-schema \'{"type":"object","properties":{"name":{"type":"string"}}}\' ' +
+    '--doccurl-response-schema \'{"type":"object","properties":{"id":{"type":"string"}}}\'';
+  const parsed = parseCurlCommand(command);
+  assert.deepEqual(parsed.requestSchema, {
+    type: "object",
+    properties: { name: { type: "string" } },
+  });
+  assert.deepEqual(parsed.responseSchema, {
+    type: "object",
+    properties: { id: { type: "string" } },
+  });
+  assert.equal(parsed.fieldDescriptions, null);
+});
+
+test("parseCurlCommand accepts --doccurl-*-schema equals form", () => {
+  const parsed = parseCurlCommand(
+    "curl https://api.example.com '--doccurl-request-schema={\"type\":\"object\"}'",
+  );
+  assert.deepEqual(parsed.requestSchema, { type: "object" });
+});
+
+test("parseCurlCommand extracts --doccurl-field-descriptions", () => {
+  const parsed = parseCurlCommand(
+    'curl https://api.example.com ' +
+      '--doccurl-field-descriptions \'{"name":"The user display name"}\'',
+  );
+  assert.deepEqual(parsed.fieldDescriptions, {
+    name: "The user display name",
+  });
+});
+
+test("parseCurlCommand rejects malformed JSON in --doccurl-request-schema", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        'curl https://api.example.com --doccurl-request-schema \'{not json\'',
+      ),
+    /Invalid JSON in --doccurl-request-schema/,
+  );
+});
+
+test("parseCurlCommand rejects file references in --doccurl-response-schema", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        "curl https://api.example.com --doccurl-response-schema @/tmp/x.json",
+      ),
+    /File references are not supported/,
+  );
+});
+
+test("parseCurlCommand rejects multi-line JSON in --doccurl-request-schema", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        "curl https://api.example.com --doccurl-request-schema '{\n\"a\":1}'",
+      ),
+    /single-line JSON/,
+  );
+});
+
+test("parseCurlCommand rejects duplicate --doccurl-request-schema flags", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        'curl https://api.example.com ' +
+          '--doccurl-request-schema \'{"a":1}\' ' +
+          '--doccurl-request-schema \'{"b":2}\'',
+      ),
+    /Duplicate flag/,
+  );
+});
+
+test("parseCurlCommand rejects non-object --doccurl-field-descriptions", () => {
+  assert.throws(
+    () =>
+      parseCurlCommand(
+        'curl https://api.example.com --doccurl-field-descriptions \'[1,2,3]\'',
+      ),
+    /must be a JSON object/,
+  );
+});
+
+test("parseCurlCommand returns null schemas when no flags are present", () => {
+  const parsed = parseCurlCommand("curl https://api.example.com");
+  assert.equal(parsed.requestSchema, null);
+  assert.equal(parsed.responseSchema, null);
+  assert.equal(parsed.fieldDescriptions, null);
+});
+
+test("validateRequestSpec rejects oversized request schema", () => {
+  const huge = { type: "object", description: "x".repeat(20 * 1024) };
+  assert.throws(
+    () =>
+      validateRequestSpec({
+        method: "GET",
+        url: "https://api.example.com",
+        headers: [],
+        body: "",
+        formParts: [],
+        requestSchema: huge,
+        responseSchema: null,
+        fieldDescriptions: null,
+      }),
+    /exceeds 16384 bytes/,
+  );
+});
+
+test("validateRequestSpec accepts schemas within size limit", () => {
+  assert.doesNotThrow(() =>
+    validateRequestSpec({
+      method: "GET",
+      url: "https://api.example.com",
+      headers: [],
+      body: "",
+      formParts: [],
+      requestSchema: { type: "object", properties: { name: { type: "string" } } },
+      responseSchema: null,
+      fieldDescriptions: null,
+    }),
+  );
+});
+
+test("buildCurlArgs strips --doccurl-*-schema flags from emitted curl invocation", async () => {
+  const { buildCurlArgs } = await import("../../engine/curl/args.js");
+  const parsed = parseCurlCommand(
+    'curl -X POST https://api.example.com ' +
+      '-H "Content-Type: application/json" ' +
+      '-d \'{"a":1}\' ' +
+      '--doccurl-request-schema \'{"type":"object"}\' ' +
+      '--doccurl-response-schema \'{"type":"object"}\' ' +
+      '--doccurl-field-descriptions \'{"a":"field"}\'',
+  );
+  const args = buildCurlArgs(parsed);
+  const flat = args.join(" ");
+  assert.equal(flat.includes("--doccurl-request-schema"), false);
+  assert.equal(flat.includes("--doccurl-response-schema"), false);
+  assert.equal(flat.includes("--doccurl-field-descriptions"), false);
+  assert.equal(flat.includes('{"type":"object"}'), false);
+  assert.equal(flat.includes('{"a":"field"}'), false);
 });
 
 test("parseSoccliCommand normalizes validation and tokenizer errors", () => {
@@ -1360,6 +1506,171 @@ test("POST /api/run-curl returns upstream status, content type, and timing metad
         contentType: "application/json; charset=utf-8",
         durationMs: 245,
       });
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl echoes attached schemas and field descriptions", async () => {
+  const captured = { args: null };
+  const execFileImpl = (cmd, args, _options, callback) => {
+    captured.args = args;
+    callback(
+      null,
+      `{"id":"abc"}${CURL_RESPONSE_META_START}200\tapplication/json\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command:
+            'curl -X POST https://api.example.com/x ' +
+            '-H "Content-Type: application/json" ' +
+            '-d \'{"a":1}\' ' +
+            '--doccurl-request-schema \'{"type":"object","properties":{"a":{"type":"integer"}}}\' ' +
+            '--doccurl-response-schema \'{"type":"object","properties":{"id":{"type":"string"}}}\' ' +
+            '--doccurl-field-descriptions \'{"a":"the input","id":"the id"}\'',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.deepEqual(data.schemas.request, {
+        type: "object",
+        properties: { a: { type: "integer" } },
+      });
+      assert.deepEqual(data.schemas.response, {
+        type: "object",
+        properties: { id: { type: "string" } },
+      });
+      assert.deepEqual(data.schemas.fieldDescriptions, {
+        a: "the input",
+        id: "the id",
+      });
+      // Schema flags are stripped before the curl args are emitted
+      const flat = captured.args.join(" ");
+      assert.equal(flat.includes("--doccurl-request-schema"), false);
+      assert.equal(flat.includes("--doccurl-response-schema"), false);
+      assert.equal(flat.includes("--doccurl-field-descriptions"), false);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl echoes null schemas when none are attached", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `hello${CURL_RESPONSE_META_START}200\ttext/plain\t0.001${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.schemas.request, null);
+      assert.equal(data.schemas.response, null);
+      assert.equal(data.schemas.fieldDescriptions, null);
+      assert.equal(data.responseFields, null);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl returns responseFields for JSON content type", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `{"id":"abc","name":"Ada","active":true,"tags":["x","y"]}` +
+        `${CURL_RESPONSE_META_START}200\tapplication/json\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.responseFields?.rootKind, "object");
+      assert.deepEqual(data.responseFields?.fields, [
+        { name: "id", type: "string", hasChildren: false },
+        { name: "name", type: "string", hasChildren: false },
+        { name: "active", type: "boolean", hasChildren: false },
+        { name: "tags", type: "array<string>", hasChildren: false },
+      ]);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl omits responseFields for non-JSON content type", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `hello` +
+        `${CURL_RESPONSE_META_START}200\ttext/plain\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.responseFields, null);
     },
   );
   if (!started) {

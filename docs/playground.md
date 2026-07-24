@@ -46,6 +46,7 @@ That request asks DocCurl to run another safe `curl` command and return the nest
 - Edit the left pane directly; the highlighted overlay stays aligned with the textarea.
 - Use `Copy` to copy current env exports plus the exact curl block you are editing.
 - Use `Upload Files` for non-generated multipart file fields; generated `@R&{...}` fields still work without browser uploads.
-- Use `Export Curls` to export every markdown file’s curl examples as Insomnia, Postman, or Hoppscotch JSON.
+- Use `Export Curls` to export every markdown file’s curl examples as Insomnia, OpenAPI 3.1, Postman, or Hoppscotch JSON.
 - Use fullscreen when you want more horizontal space for large JSON bodies or responses.
+- Add `--doccurl-request-schema`, `--doccurl-response-schema`, and `--doccurl-field-descriptions` flags to document request/response shapes and surface a **Schema** button for live diffs. See [Schemas](./schemas.md).
 - Reset document changes from the environment toolbar if you want to return to the original examples.

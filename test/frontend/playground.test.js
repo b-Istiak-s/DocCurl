@@ -7,7 +7,9 @@ import {
   createStableCurlBlockId,
   formatCurlCommand,
   loadStoredCurlEdits,
+  stripDocCurlSchemaFlags,
 } from "../../frontend/modules/playground.js";
+import { __test__ as schemaTest } from "../../frontend/modules/schema.js";
 
 class MockClassList {
   constructor(element) {
@@ -384,6 +386,8 @@ function buildPlaygroundMarkup(container) {
     "Run a command to see the response",
   );
   const responseActions = createElement("div", "panelActions");
+  const schemaButton = createElement("button", "schemaBtn", "Schema");
+  schemaButton.hidden = true;
   const fullscreenButton = createElement(
     "button",
     "fullscreenBtn",
@@ -392,7 +396,7 @@ function buildPlaygroundMarkup(container) {
 
   responseHeader.append(responseLabel, responseMetaButton);
   output.appendChild(outputEmpty);
-  responseActions.appendChild(fullscreenButton);
+  responseActions.append(schemaButton, fullscreenButton);
   responsePane.append(responseHeader, responseToast, output, responseActions);
 
   container.append(requestPane, responsePane);
@@ -1530,4 +1534,169 @@ test("loadStoredCurlEdits drops reserved keys and returns null-prototype maps", 
   );
   assert.equal(edits.__proto__, undefined);
   assert.equal(edits.constructor, undefined);
+});
+
+test("stripDocCurlSchemaFlags removes all three doccurl flags and their values", () => {
+  const input =
+    'curl https://api.example.com --doccurl-request-schema \'{"type":"object"}\' ' +
+    '--doccurl-response-schema=\'{"type":"object"}\' --doccurl-field-descriptions \'{"a":"the a"}\'';
+  const stripped = stripDocCurlSchemaFlags(input);
+  assert.equal(stripped.includes("--doccurl-request-schema"), false);
+  assert.equal(stripped.includes("--doccurl-response-schema"), false);
+  assert.equal(stripped.includes("--doccurl-field-descriptions"), false);
+  assert.equal(stripped.includes("type"), false);
+  assert.equal(stripped.startsWith("curl https://api.example.com"), true);
+});
+
+test("createStableCurlBlockId is stable when only schema flags change", () => {
+  const base = "curl https://api.example.com/users";
+  const withSchemas = formatCurlCommand(
+    base + ' --doccurl-request-schema \'{"type":"object"}\'',
+  );
+  const withoutSchemas = formatCurlCommand(base);
+  const idWith = createStableCurlBlockId("guide.md", 0, withSchemas);
+  const idWithout = createStableCurlBlockId("guide.md", 0, withoutSchemas);
+  assert.equal(idWith, idWithout);
+});
+
+test("schema.renderType renders common type variants", () => {
+  assert.equal(schemaTest.renderType({ type: "string" }), "string");
+  assert.equal(schemaTest.renderType({ type: "integer" }), "integer");
+  assert.equal(
+    schemaTest.renderType({ type: ["string", "null"] }),
+    "string · nullable",
+  );
+  assert.equal(
+    schemaTest.renderType({ type: ["string", "integer"] }),
+    "string | integer",
+  );
+  assert.equal(
+    schemaTest.renderType({ type: "array", items: { type: "integer" } }),
+    "array<integer>",
+  );
+  assert.equal(schemaTest.renderType(true), "any");
+  assert.equal(schemaTest.renderType(false), "never");
+  assert.equal(schemaTest.renderType({}), "(unspecified)");
+});
+
+test("schema.renderConstraints renders numeric and string bounds", () => {
+  assert.equal(
+    schemaTest.renderConstraints({
+      type: "integer",
+      minimum: 0,
+      maximum: 150,
+    }),
+    "≥ 0; ≤ 150",
+  );
+  assert.equal(
+    schemaTest.renderConstraints({
+      type: "string",
+      minLength: 1,
+      maxLength: 100,
+      format: "email",
+    }),
+    "length 1–100; format: email",
+  );
+  assert.equal(
+    schemaTest.renderConstraints({ type: "object", additionalProperties: false }),
+    "closed object",
+  );
+});
+
+test("schema.buildRows flattens nested properties and arrays of objects", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "the name" },
+      contact: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email" },
+        },
+        required: ["email"],
+      },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+          },
+        },
+      },
+    },
+    required: ["name", "contact"],
+  };
+  const rows = schemaTest.buildRows(schema, null);
+  const paths = rows.map((r) => r.path);
+  assert.deepEqual(paths, [
+    "name",
+    "contact",
+    "contact.email",
+    "items",
+    "items[].id",
+  ]);
+  assert.equal(rows[0].presence, "Required");
+  assert.equal(rows[1].presence, "Required");
+  assert.equal(rows[2].presence, "Required");
+  assert.equal(rows[3].presence, "Optional");
+  assert.equal(rows[4].presence, "Optional");
+});
+
+test("schema.buildRows merges sidecar field descriptions", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "the schema-side description" },
+    },
+  };
+  const rows = schemaTest.buildRows(schema, { name: "sidecar wins" });
+  assert.equal(rows[0].description, "sidecar wins");
+});
+
+test("schema.computeResponseDiff categorizes matches, mismatches, missing, and extras", () => {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      id: { type: "string" },
+      age: { type: "integer" },
+      email: { type: "string" },
+    },
+    required: ["id", "email"],
+  };
+  const responseFields = {
+    rootKind: "object",
+    fields: [
+      { name: "id", type: "string", hasChildren: false },
+      { name: "age", type: "string", hasChildren: false }, // mismatch
+      { name: "extra", type: "boolean", hasChildren: false }, // extra
+      // email missing
+    ],
+  };
+  const diff = schemaTest.computeResponseDiff(schema, responseFields);
+  assert.equal(diff.matches.length, 1);
+  assert.equal(diff.matches[0].name, "id");
+  assert.equal(diff.mismatches.length, 1);
+  assert.equal(diff.mismatches[0].name, "age");
+  assert.equal(diff.missing.length, 1);
+  assert.equal(diff.missing[0].name, "email");
+  assert.equal(diff.extra.length, 1);
+  assert.equal(diff.extra[0].name, "extra");
+});
+
+test("schema.computeResponseDiff is interoperable between number and integer", () => {
+  const schema = { type: "object", properties: { age: { type: "number" } } };
+  const responseFields = {
+    rootKind: "object",
+    fields: [{ name: "age", type: "integer", hasChildren: false }],
+  };
+  const diff = schemaTest.computeResponseDiff(schema, responseFields);
+  assert.equal(diff.matches.length, 1);
+  assert.equal(diff.mismatches.length, 0);
+});
+
+test("schema.computeResponseDiff returns an error when no schema is attached", () => {
+  const diff = schemaTest.computeResponseDiff(null, { rootKind: "object", fields: [] });
+  assert.ok(diff.error);
 });

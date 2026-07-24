@@ -1,5 +1,45 @@
 import { tokenizeShell } from "../playground.js";
 
+const DOCCURL_SCHEMA_FLAGS = new Set([
+  "--doccurl-request-schema",
+  "--doccurl-response-schema",
+  "--doccurl-field-descriptions",
+]);
+
+const SCHEMA_FLAG_TO_SPEC = {
+  "--doccurl-request-schema": "requestSchema",
+  "--doccurl-response-schema": "responseSchema",
+  "--doccurl-field-descriptions": "fieldDescriptions",
+};
+
+function parseSchemaFlagValue(flag, rawValue) {
+  if (typeof rawValue !== "string") {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  const trimmed = rawValue.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`Empty value for ${flag}`);
+  }
+  if (trimmed.startsWith("@")) {
+    throw new Error(
+      `File references are not supported for ${flag}; paste the JSON inline.`,
+    );
+  }
+  if (/[\r\n]/.test(trimmed)) {
+    throw new Error(`${flag} must be a single-line JSON value.`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${flag}: ${error.message}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${flag} must be a JSON object.`);
+  }
+  return parsed;
+}
+
 function normalizeCommand(command) {
   return String(command || "").trim();
 }
@@ -87,6 +127,7 @@ export function parseCurlForExport(command, options = 0) {
   const headers = [];
   const bodyParts = [];
   const formParts = [];
+  const docCurlFlags = {};
 
   function readNextValue(flag, tokenIndex) {
     const value = tokens[tokenIndex + 1];
@@ -177,6 +218,34 @@ export function parseCurlForExport(command, options = 0) {
       continue;
     }
 
+    if (DOCCURL_SCHEMA_FLAGS.has(token)) {
+      const specKey = SCHEMA_FLAG_TO_SPEC[token];
+      if (docCurlFlags[specKey] !== undefined) {
+        throw new Error(`Duplicate flag: ${token}`);
+      }
+      const value = readNextValue(token, i);
+      docCurlFlags[specKey] = parseSchemaFlagValue(token, value);
+      i += 1;
+      continue;
+    }
+
+    let schemaEqualsMatch = null;
+    for (const flag of DOCCURL_SCHEMA_FLAGS) {
+      if (token.startsWith(`${flag}=`)) {
+        schemaEqualsMatch = { flag, value: token.slice(flag.length + 1) };
+        break;
+      }
+    }
+    if (schemaEqualsMatch) {
+      const { flag, value } = schemaEqualsMatch;
+      const specKey = SCHEMA_FLAG_TO_SPEC[flag];
+      if (docCurlFlags[specKey] !== undefined) {
+        throw new Error(`Duplicate flag: ${flag}`);
+      }
+      docCurlFlags[specKey] = parseSchemaFlagValue(flag, value);
+      continue;
+    }
+
     if (!url && !token.startsWith("-")) {
       url = token;
       continue;
@@ -199,5 +268,8 @@ export function parseCurlForExport(command, options = 0) {
     formParts,
     name: config.name || buildRequestName(normalizedMethod, url, config.index),
     rawCommand: normalizeCommand(command),
+    requestSchema: docCurlFlags.requestSchema || null,
+    responseSchema: docCurlFlags.responseSchema || null,
+    fieldDescriptions: docCurlFlags.fieldDescriptions || null,
   };
 }

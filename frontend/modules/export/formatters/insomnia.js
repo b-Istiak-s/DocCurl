@@ -1,4 +1,9 @@
-import { buildFormParts, mapPlaceholders } from "./shared.js";
+import {
+  buildFieldDescriptionText,
+  buildFormParts,
+  buildSchemaMetadata,
+  mapPlaceholders,
+} from "./shared.js";
 
 function buildRequestBody(request) {
   if (request.formParts.length > 0) {
@@ -21,6 +26,30 @@ function buildRequestBody(request) {
     mimeType: "text/plain",
     text: mapPlaceholders(request.body, "insomnia"),
   };
+}
+
+function buildInsomniaDescription(request) {
+  if (!request) return "";
+  const sections = [];
+  const fieldDescriptionText = buildFieldDescriptionText(request);
+  if (fieldDescriptionText) {
+    sections.push("Field descriptions:\n" + fieldDescriptionText);
+  }
+  if (request.requestSchema) {
+    sections.push(
+      "Request schema (JSON Schema 2020-12):\n```json\n" +
+        JSON.stringify(request.requestSchema, null, 2) +
+        "\n```",
+    );
+  }
+  if (request.responseSchema) {
+    sections.push(
+      "Response schema (JSON Schema 2020-12):\n```json\n" +
+        JSON.stringify(request.responseSchema, null, 2) +
+        "\n```",
+    );
+  }
+  return sections.join("\n\n");
 }
 
 export function formatInsomniaExport(model) {
@@ -59,6 +88,8 @@ export function formatInsomniaExport(model) {
     });
 
     group.requests.forEach((entry, requestIndex) => {
+      const description = buildInsomniaDescription(entry.request);
+      const meta = buildSchemaMetadata(entry.request) || {};
       resources.push({
         _id: `req_doccurl_${groupIndex}_${requestIndex}`,
         _type: "request",
@@ -71,6 +102,11 @@ export function formatInsomniaExport(model) {
           value: mapPlaceholders(header.value, "insomnia"),
         })),
         body: buildRequestBody(entry.request),
+        description,
+        meta: {
+          ...meta,
+          "doccurl://note": "Schemas and field descriptions are documentation only; they are not executed by Insomnia.",
+        },
       });
     });
   });
