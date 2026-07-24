@@ -45,6 +45,7 @@ doccurl serve --dev
 
 - `overview.md` for the product tour
 - `playground.md` for the supported curl subset
+- `schemas.md` for documenting request/response shapes with `--doccurl-*-schema` flags
 - `self-test-api.md` for runnable examples that target DocCurl itself
 
 5. Add your own docs when you are ready:
@@ -140,38 +141,59 @@ Each playground also includes:
 
 - `Copy`: copies shell-ready `export NAME='value'` lines plus the current curl block exactly as shown.
 - `Upload Files`: appears for multipart `-F` requests, lets users attach browser files for non-generated `@...` multipart parts, and keeps generated `@R&{...}` parts on the built-in synthetic-file path.
-- `Export Curls`: exports all docs grouped by markdown file as Insomnia, Postman, or Hoppscotch JSON, including current env values.
+- `Schema`: appears whenever a curl block attaches at least one `--doccurl-*-schema` flag. Opens a modal with two tabs — a Request docs table describing the request body and a Response docs table with a live diff (matches, type mismatches, missing fields, extras) against the most recent JSON response.
+- `Export Curls`: exports all docs grouped by markdown file as Insomnia, OpenAPI 3.1, Postman, or Hoppscotch JSON, including current env values. Schema flags travel with the curl block in every format.
 
 Browser-selected uploads are limited to `10 MB` per file and `25 MB` total per run.
 
 `soccli` sessions stream incremental plain-text output in the browser and default to a `60` second session timeout.
 
+### Documenting Request/Response Shapes
+
+Attach JSON Schema 2020-12 to any curl block with three optional flags. They travel inline with the command, are stripped before `curl` runs, and unlock the Schema button plus the OpenAPI exporter. See [`docs/schemas.md`](docs/schemas.md) for the full vocabulary and authoring rules.
+
+```bash
+curl -X POST $BASE_URL/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ada","email":"ada@example.com"}' \
+  --doccurl-request-schema '{"type":"object","properties":{"name":{"type":"string"},"email":{"type":"string","format":"email"}},"required":["name","email"]}' \
+  --doccurl-response-schema '{"type":"object","properties":{"id":{"type":"string"},"createdAt":{"type":"string","format":"date-time"}}}' \
+  --doccurl-field-descriptions '{"name":"The user display name","email":"The contact email"}'
+```
+
+- Request schema: documentation only — never used for validation or auto-fill.
+- Response schema: drives the live diff against the most recent response.
+- Field descriptions: sidecar map merged into the docs table and the OpenAPI components.
+
 Starter docs use `$DOCCURL_BASE_URL`. Set it in the environment toolbar to your running DocCurl app URL so the built-in self-test pages can run without another service.
 
-| Name                                                   | Supported | Plans to add                               | Priority |
-| ------------------------------------------------------ | --------- | ------------------------------------------ | -------- |
-| REST over HTTP/HTTPS                                   | Yes       | No specific change needed                  | x        |
-| GraphQL over HTTP                                      | Yes       | No specific change needed                  | x        |
-| SOAP over HTTP                                         | Yes       | No specific change needed                  | x        |
-| JSON request/response APIs                             | Yes       | No specific change needed                  | x        |
-| XML request/response APIs                              | Yes       | No specific change needed                  | x        |
-| Query params in URL                                    | Yes       | No specific change needed                  | x        |
-| Standard body data via `-d` / `--data-*`               | Yes       | No specific change needed                  | x        |
-| Multipart text fields like `-F "field=value"`          | Yes       | No specific change needed                  | x        |
-| Generated file uploads like `-F "file=@R&{x.pdf}"`     | Yes       | No specific change needed                  | x        |
-| Browser multipart uploads like `-F "file=@/tmp/x.pdf"` | Yes       | No specific change needed                  | x        |
-| Auth headers / API keys / Bearer tokens                | Yes       | No specific change needed                  | x        |
-| Localhost/private targets in `--dev`                   | Yes       | No specific change needed                  | x        |
-| WebSockets                                             | Yes       | Via `soccli` playground blocks             | x        |
-| GraphQL subscriptions over WebSocket                   | Yes       | Via `soccli` (`graphql-transport-ws`)      | x        |
-| gRPC                                                   | No        | Not planned yet                            | medium   |
-| Browser-mapped multipart uploads using `@...` tokens   | Yes       | No specific change needed                  | x        |
-| Redirect following with `-L`                           | No        | Not planned yet                            | low      |
-| Proxy support                                          | No        | Not planned yet                            | low      |
-| Cookie jar / session persistence workflows             | No        | Not planned yet                            | medium   |
-| Long-lived streaming / interactive flows               | No        | Not planned yet                            | medium   |
-| Client cert / mTLS curl flows                          | No        | Not planned yet                            | low      |
-| WebRTC                                                 | No        | Planned;                                   | very low |
+| Name                                                   | Supported | Plans to add                          | Priority |
+| ------------------------------------------------------ | --------- | ------------------------------------- | -------- |
+| REST over HTTP/HTTPS                                   | Yes       | No specific change needed             | x        |
+| GraphQL over HTTP                                      | Yes       | No specific change needed             | x        |
+| SOAP over HTTP                                         | Yes       | No specific change needed             | x        |
+| JSON request/response APIs                             | Yes       | No specific change needed             | x        |
+| XML request/response APIs                              | Yes       | No specific change needed             | x        |
+| Query params in URL                                    | Yes       | No specific change needed             | x        |
+| Standard body data via `-d` / `--data-*`               | Yes       | No specific change needed             | x        |
+| Multipart text fields like `-F "field=value"`          | Yes       | No specific change needed             | x        |
+| Generated file uploads like `-F "file=@R&{x.pdf}"`     | Yes       | No specific change needed             | x        |
+| Browser multipart uploads like `-F "file=@/tmp/x.pdf"` | Yes       | No specific change needed             | x        |
+| Auth headers / API keys / Bearer tokens                | Yes       | No specific change needed             | x        |
+| Localhost/private targets in `--dev`                   | Yes       | No specific change needed             | x        |
+| WebSockets                                             | Yes       | Via `soccli` playground blocks        | x        |
+| GraphQL subscriptions over WebSocket                   | Yes       | Via `soccli` (`graphql-transport-ws`) | x        |
+| gRPC                                                   | No        | Not planned yet                       | medium   |
+| Browser-mapped multipart uploads using `@...` tokens   | Yes       | No specific change needed             | x        |
+| JSON Schema 2020-12 via `--doccurl-*-schema` flags     | Yes       | No specific change needed             | x        |
+| Sidecar field descriptions via `--doccurl-field-descriptions` | Yes | No specific change needed           | x        |
+| OpenAPI 3.1 export                                     | Yes       | No specific change needed             | x        |
+| Redirect following with `-L`                           | No        | Not planned yet                       | low      |
+| Proxy support                                          | No        | Not planned yet                       | low      |
+| Cookie jar / session persistence workflows             | No        | Not planned yet                       | medium   |
+| Long-lived streaming / interactive flows               | No        | Not planned yet                       | medium   |
+| Client cert / mTLS curl flows                          | No        | Not planned yet                       | low      |
+| WebRTC                                                 | No        | Planned;                              | very low |
 
 ## Built-in Self-Test Docs
 

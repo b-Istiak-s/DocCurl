@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 export const STARTER_DOC_FILES = [
   "overview.md",
   "playground.md",
+  "schemas.md",
   "self-test-api.md",
 ];
 
