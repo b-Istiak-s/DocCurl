@@ -1,4 +1,10 @@
-import { buildFormParts, mapPlaceholders, toHeaderList } from "./shared.js";
+import {
+  buildFieldDescriptionText,
+  buildFormParts,
+  buildSchemaMetadata,
+  mapPlaceholders,
+  toHeaderList,
+} from "./shared.js";
 import { buildGroupFolderTree } from "./folders.js";
 
 function splitPostmanQuery(queryText) {
@@ -75,8 +81,35 @@ function buildPostmanUrl(rawUrl) {
   return url;
 }
 
+function buildRequestDescription(request) {
+  if (!request) return undefined;
+  const lines = [];
+  const fieldDescriptionText = buildFieldDescriptionText(request);
+  if (fieldDescriptionText) {
+    lines.push("Field descriptions:");
+    lines.push(fieldDescriptionText);
+  }
+  if (request.requestSchema) {
+    lines.push("");
+    lines.push("Request schema (JSON Schema 2020-12):");
+    lines.push("```json");
+    lines.push(JSON.stringify(request.requestSchema, null, 2));
+    lines.push("```");
+  }
+  if (request.responseSchema) {
+    lines.push("");
+    lines.push("Response schema (JSON Schema 2020-12):");
+    lines.push("```json");
+    lines.push(JSON.stringify(request.responseSchema, null, 2));
+    lines.push("```");
+  }
+  if (lines.length === 0) return undefined;
+  return lines.join("\n");
+}
+
 function createPostmanItem(request) {
   const headers = toHeaderList(request.headers, "double-brace");
+  const description = buildRequestDescription(request);
   const item = {
     name: request.name,
     request: {
@@ -88,6 +121,10 @@ function createPostmanItem(request) {
       url: buildPostmanUrl(request.url),
     },
   };
+
+  if (description) {
+    item.request.description = description;
+  }
 
   if (request.formParts.length > 0) {
     item.request.body = {
@@ -103,6 +140,11 @@ function createPostmanItem(request) {
     item.request.body = {
       mode: "raw",
       raw: mapPlaceholders(request.body, "double-brace"),
+      options: {
+        raw: {
+          language: "json",
+        },
+      },
     };
   }
 
@@ -137,3 +179,9 @@ export function formatPostmanExport(model) {
     })),
   };
 }
+
+export const __test__ = {
+  buildRequestDescription,
+  createPostmanItem,
+  buildSchemaMetadata,
+};

@@ -491,3 +491,188 @@ test("markdown export preserves untouched markdown and only replaces saved curl 
   );
   assert.equal(decodeText(archive["nested/notes.md"]), "# Notes\n\nNo curl here.\n");
 });
+
+import { parseCurlForExport } from "../../frontend/modules/export/curl.js";
+
+test("parseCurlForExport extracts --doccurl-request-schema and --doccurl-response-schema", () => {
+  const command = [
+    "curl",
+    "-X",
+    "POST",
+    "https://api.example.com/users",
+    "-H",
+    "Content-Type: application/json",
+    "-d",
+    "'{\"name\":\"Ada\"}'",
+    "--doccurl-request-schema",
+    "'{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}'",
+    "--doccurl-response-schema",
+    "'{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}'",
+    "--doccurl-field-descriptions",
+    "'{\"name\":\"The user display name\",\"id\":\"Server-assigned identifier\"}'",
+  ].join(" ");
+
+  const request = parseCurlForExport(command);
+  assert.equal(request.method, "POST");
+  assert.deepEqual(request.requestSchema, {
+    type: "object",
+    properties: { name: { type: "string" } },
+    required: ["name"],
+  });
+  assert.deepEqual(request.responseSchema, {
+    type: "object",
+    properties: { id: { type: "string" } },
+  });
+  assert.deepEqual(request.fieldDescriptions, {
+    name: "The user display name",
+    id: "Server-assigned identifier",
+  });
+});
+
+test("parseCurlForExport accepts --doccurl-*-schema equals form", () => {
+  const command =
+    "curl https://api.example.com/x --doccurl-request-schema='{\"type\":\"object\"}'";
+  const request = parseCurlForExport(command);
+  assert.deepEqual(request.requestSchema, { type: "object" });
+});
+
+test("parseCurlForExport returns null schemas when no flags are attached", () => {
+  const request = parseCurlForExport("curl https://api.example.com/x");
+  assert.equal(request.requestSchema, null);
+  assert.equal(request.responseSchema, null);
+  assert.equal(request.fieldDescriptions, null);
+});
+
+test("parseCurlForExport rejects malformed JSON in schema flag", () => {
+  assert.throws(
+    () =>
+      parseCurlForExport(
+        "curl https://api.example.com/x --doccurl-request-schema '{not json}'",
+      ),
+    /Invalid JSON in --doccurl-request-schema/,
+  );
+});
+
+test("parseCurlForExport rejects file references in schema flag", () => {
+  assert.throws(
+    () =>
+      parseCurlForExport(
+        "curl https://api.example.com/x --doccurl-request-schema @schema.json",
+      ),
+    /File references are not supported/,
+  );
+});
+
+test("parseCurlForExport rejects duplicate --doccurl-request-schema flags", () => {
+  assert.throws(
+    () =>
+      parseCurlForExport(
+        "curl https://api.example.com/x --doccurl-request-schema '{\"type\":\"object\"}' --doccurl-request-schema '{\"type\":\"array\"}'",
+      ),
+    /Duplicate flag: --doccurl-request-schema/,
+  );
+});
+
+import { formatPostmanExport } from "../../frontend/modules/export/formatters/postman.js";
+import { formatInsomniaExport } from "../../frontend/modules/export/formatters/insomnia.js";
+
+function buildSingleRequestModel(request) {
+  return {
+    exportedAt: "2024-01-01T00:00:00.000Z",
+    env: {},
+    groups: [
+      {
+        docPath: "guide.md",
+        requests: [
+          {
+            id: "block-1",
+            docPath: "guide.md",
+            blockIndex: 0,
+            command: "curl",
+            originalCommand: "curl",
+            effectiveCommand: "curl",
+            hasStoredEdit: false,
+            request,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test("Postman export includes request/response schemas and field descriptions", () => {
+  const request = parseCurlForExport(
+    [
+      "curl",
+      "-X",
+      "POST",
+      "https://api.example.com/users",
+      "-d",
+      "'{\"name\":\"Ada\"}'",
+      "--doccurl-request-schema",
+      "'{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}'",
+      "--doccurl-response-schema",
+      "'{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}'",
+      "--doccurl-field-descriptions",
+      "'{\"name\":\"The user display name\"}'",
+    ].join(" "),
+  );
+
+  const payload = formatPostmanExport(buildSingleRequestModel(request));
+  const item = payload.item[0].item[0];
+  assert.ok(typeof item.request.description === "string");
+  assert.match(item.request.description, /Field descriptions/);
+  assert.match(item.request.description, /The user display name/);
+  assert.match(item.request.description, /Request schema \(JSON Schema 2020-12\)/);
+  assert.match(item.request.description, /Response schema \(JSON Schema 2020-12\)/);
+  assert.deepEqual(item.request.body, {
+    mode: "raw",
+    raw: '{"name":"Ada"}',
+    options: { raw: { language: "json" } },
+  });
+});
+
+test("Postman export omits description when no schemas are attached", () => {
+  const request = parseCurlForExport("curl https://api.example.com/users");
+  const payload = formatPostmanExport(buildSingleRequestModel(request));
+  const item = payload.item[0].item[0];
+  assert.equal("description" in item.request, false);
+  assert.equal("body" in item.request, false);
+});
+
+test("Insomnia export includes schema metadata and description", () => {
+  const request = parseCurlForExport(
+    [
+      "curl",
+      "-X",
+      "POST",
+      "https://api.example.com/users",
+      "-d",
+      "'{\"name\":\"Ada\"}'",
+      "--doccurl-request-schema",
+      "'{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}'",
+      "--doccurl-response-schema",
+      "'{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}'",
+      "--doccurl-field-descriptions",
+      "'{\"name\":\"The user display name\"}'",
+    ].join(" "),
+  );
+
+  const payload = formatInsomniaExport(buildSingleRequestModel(request));
+  const req = payload.resources.find((r) => r._type === "request");
+  assert.ok(req);
+  assert.match(req.description, /Field descriptions/);
+  assert.match(req.description, /Request schema/);
+  assert.match(req.description, /Response schema/);
+  assert.deepEqual(req.meta.requestSchema, request.requestSchema);
+  assert.deepEqual(req.meta.responseSchema, request.responseSchema);
+  assert.equal(req.meta["doccurl://note"].includes("documentation only"), true);
+});
+
+test("Insomnia export has empty meta object when no schemas are attached", () => {
+  const request = parseCurlForExport("curl https://api.example.com/users");
+  const payload = formatInsomniaExport(buildSingleRequestModel(request));
+  const req = payload.resources.find((r) => r._type === "request");
+  assert.equal(req.description, "");
+  assert.deepEqual(Object.keys(req.meta), ["doccurl://note"]);
+});
