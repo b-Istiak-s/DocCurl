@@ -1513,6 +1513,171 @@ test("POST /api/run-curl returns upstream status, content type, and timing metad
   }
 });
 
+test("POST /api/run-curl echoes attached schemas and field descriptions", async () => {
+  const captured = { args: null };
+  const execFileImpl = (cmd, args, _options, callback) => {
+    captured.args = args;
+    callback(
+      null,
+      `{"id":"abc"}${CURL_RESPONSE_META_START}200\tapplication/json\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command:
+            'curl -X POST https://api.example.com/x ' +
+            '-H "Content-Type: application/json" ' +
+            '-d \'{"a":1}\' ' +
+            '--doccurl-request-schema \'{"type":"object","properties":{"a":{"type":"integer"}}}\' ' +
+            '--doccurl-response-schema \'{"type":"object","properties":{"id":{"type":"string"}}}\' ' +
+            '--doccurl-field-descriptions \'{"a":"the input","id":"the id"}\'',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(data.success, true);
+      assert.deepEqual(data.schemas.request, {
+        type: "object",
+        properties: { a: { type: "integer" } },
+      });
+      assert.deepEqual(data.schemas.response, {
+        type: "object",
+        properties: { id: { type: "string" } },
+      });
+      assert.deepEqual(data.schemas.fieldDescriptions, {
+        a: "the input",
+        id: "the id",
+      });
+      // Schema flags are stripped before the curl args are emitted
+      const flat = captured.args.join(" ");
+      assert.equal(flat.includes("--doccurl-request-schema"), false);
+      assert.equal(flat.includes("--doccurl-response-schema"), false);
+      assert.equal(flat.includes("--doccurl-field-descriptions"), false);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl echoes null schemas when none are attached", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `hello${CURL_RESPONSE_META_START}200\ttext/plain\t0.001${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.schemas.request, null);
+      assert.equal(data.schemas.response, null);
+      assert.equal(data.schemas.fieldDescriptions, null);
+      assert.equal(data.responseFields, null);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl returns responseFields for JSON content type", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `{"id":"abc","name":"Ada","active":true,"tags":["x","y"]}` +
+        `${CURL_RESPONSE_META_START}200\tapplication/json\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.responseFields?.rootKind, "object");
+      assert.deepEqual(data.responseFields?.fields, [
+        { name: "id", type: "string", hasChildren: false },
+        { name: "name", type: "string", hasChildren: false },
+        { name: "active", type: "boolean", hasChildren: false },
+        { name: "tags", type: "array<string>", hasChildren: false },
+      ]);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
+test("POST /api/run-curl omits responseFields for non-JSON content type", async () => {
+  const execFileImpl = (_command, _args, _options, callback) => {
+    callback(
+      null,
+      `hello` +
+        `${CURL_RESPONSE_META_START}200\ttext/plain\t0.05${CURL_RESPONSE_META_END}`,
+      "",
+    );
+  };
+  const started = await withServer(
+    {
+      isDev: false,
+      dnsLookup: async () => [{ address: "8.8.8.8" }],
+      execFileImpl,
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/run-curl`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: 'curl "https://api.example.com/v1/ping"',
+        }),
+      });
+      const data = await response.json();
+
+      assert.equal(data.responseFields, null);
+    },
+  );
+  if (!started) {
+    return;
+  }
+});
+
 test("POST /api/run-curl preserves upstream HTTP 500 responses in output metadata", async () => {
   const started = await withServer(
     {

@@ -112,6 +112,50 @@ function summarizeLoggedExecutionError(error) {
   return "Execution failed";
 }
 
+function jsonValueType(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "array";
+    return `array<${jsonValueType(value[0])}>`;
+  }
+  if (typeof value === "object") return "object";
+  return typeof value;
+}
+
+function summarizeJsonResponseFields(rawOutput, limits = LIMITS) {
+  if (typeof rawOutput !== "string" || rawOutput.length === 0) {
+    return null;
+  }
+  if (rawOutput.length > limits.maxOutputBytes) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawOutput);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const fields = [];
+  for (const [key, value] of Object.entries(parsed)) {
+    fields.push({
+      name: key,
+      type: jsonValueType(value),
+      hasChildren:
+        (value !== null &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.keys(value).length > 0) ||
+        (Array.isArray(value) &&
+          value.length > 0 &&
+          typeof value[0] === "object"),
+    });
+  }
+  return { rootKind: "object", fields };
+}
+
 export function setupCurlRoutes(app, options = {}) {
   const isDev = Boolean(options.isDev);
   const execFileImpl = options.execFileImpl || execFile;
@@ -295,10 +339,20 @@ export function setupCurlRoutes(app, options = {}) {
             }
 
             const result = parseCurlResponseMetadata(stdout);
+            const responseFields =
+              result.metadata?.contentType?.includes("json")
+                ? summarizeJsonResponseFields(result.output)
+                : null;
             return res.json({
               success: true,
               output: result.output,
               metadata: result.metadata,
+              schemas: {
+                request: requestSpec.requestSchema || null,
+                response: requestSpec.responseSchema || null,
+                fieldDescriptions: requestSpec.fieldDescriptions || null,
+              },
+              responseFields,
             });
           });
         },
