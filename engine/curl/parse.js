@@ -1,6 +1,12 @@
-import { ALLOWED_METHODS, DATA_FLAGS, FORM_FLAGS } from "./constants.js";
+import { ALLOWED_METHODS, DATA_FLAGS, DOCCURL_SCHEMA_FLAGS, FORM_FLAGS } from "./constants.js";
 import { tokenizeCommand } from "./tokenize.js";
 import { parseMultipartFormPart } from "./uploads/parse.js";
+
+const SCHEMA_FLAG_TO_SPEC = {
+  "--doccurl-request-schema": "requestSchema",
+  "--doccurl-response-schema": "responseSchema",
+  "--doccurl-field-descriptions": "fieldDescriptions",
+};
 
 export function parseHeader(rawHeader) {
   if (typeof rawHeader !== "string" || !rawHeader.includes(":")) {
@@ -18,6 +24,34 @@ export function parseHeader(rawHeader) {
   return { name, value };
 }
 
+function parseDocCurlFlagValue(flag, rawValue) {
+  if (typeof rawValue !== "string") {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  const trimmed = rawValue.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`Empty value for ${flag}`);
+  }
+  if (trimmed.startsWith("@")) {
+    throw new Error(
+      `File references are not supported for ${flag}; paste the JSON inline.`,
+    );
+  }
+  if (/[\r\n]/.test(trimmed)) {
+    throw new Error(`${flag} must be a single-line JSON value.`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${flag}: ${error.message}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${flag} must be a JSON object.`);
+  }
+  return parsed;
+}
+
 export function parseCurlCommand(command) {
   const tokens = tokenizeCommand(command);
   if (tokens[0] !== "curl") {
@@ -30,6 +64,7 @@ export function parseCurlCommand(command) {
   const headers = [];
   const bodyParts = [];
   const formParts = [];
+  const docCurlFlags = {};
   let uploadIndex = 0;
 
   function readNextValue(flag, index) {
@@ -159,6 +194,34 @@ export function parseCurlCommand(command) {
       throw new Error("Redirect-following (-L/--location) is disabled");
     }
 
+    if (DOCCURL_SCHEMA_FLAGS.has(token)) {
+      const specKey = SCHEMA_FLAG_TO_SPEC[token];
+      if (docCurlFlags[specKey] !== undefined) {
+        throw new Error(`Duplicate flag: ${token}`);
+      }
+      const value = readNextValue(token, i);
+      docCurlFlags[specKey] = parseDocCurlFlagValue(token, value);
+      i += 1;
+      continue;
+    }
+
+    let schemaEqualsMatch = null;
+    for (const flag of DOCCURL_SCHEMA_FLAGS) {
+      if (token.startsWith(`${flag}=`)) {
+        schemaEqualsMatch = { flag, value: token.slice(flag.length + 1) };
+        break;
+      }
+    }
+    if (schemaEqualsMatch) {
+      const { flag, value } = schemaEqualsMatch;
+      const specKey = SCHEMA_FLAG_TO_SPEC[flag];
+      if (docCurlFlags[specKey] !== undefined) {
+        throw new Error(`Duplicate flag: ${flag}`);
+      }
+      docCurlFlags[specKey] = parseDocCurlFlagValue(flag, value);
+      continue;
+    }
+
     if (token === "--") {
       const remaining = tokens.slice(i + 1);
       if (remaining.length === 0) {
@@ -207,6 +270,9 @@ export function parseCurlCommand(command) {
     headers,
     body: bodyParts.join("&"),
     formParts,
+    requestSchema: docCurlFlags.requestSchema || null,
+    responseSchema: docCurlFlags.responseSchema || null,
+    fieldDescriptions: docCurlFlags.fieldDescriptions || null,
   };
 }
 
@@ -235,6 +301,9 @@ export function parseLegacyRequest(payload) {
     headers: headerList,
     body: body == null ? "" : String(body),
     formParts: [],
+    requestSchema: null,
+    responseSchema: null,
+    fieldDescriptions: null,
   };
 }
 
