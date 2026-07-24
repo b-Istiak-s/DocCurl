@@ -345,9 +345,10 @@ test("createCurlExportSystem renders export format buttons and exports stored ed
     exportSystem.openExportDialog();
 
     const optionButtons = documentRef.body.querySelectorAll(".exportOptionBtn");
-    assert.equal(optionButtons.length, 3);
+    assert.equal(optionButtons.length, 4);
     assert.deepEqual(optionButtons.map((button) => button.textContent), [
       "Insomnia",
+      "OpenAPI 3.1",
       "Postman",
       "Markdown",
     ]);
@@ -676,3 +677,114 @@ test("Insomnia export has empty meta object when no schemas are attached", () =>
   assert.equal(req.description, "");
   assert.deepEqual(Object.keys(req.meta), ["doccurl://note"]);
 });
+
+import { buildOpenApiSpec } from "../../frontend/modules/export/formatters/openapi.js";
+
+function buildModelFromCommands(commands) {
+  return {
+    exportedAt: "2024-01-01T00:00:00.000Z",
+    env: {},
+    groups: [
+      {
+        docPath: "guide.md",
+        requests: commands.map((command, index) => {
+          const request = parseCurlForExport(command);
+          return {
+            id: `block-${index}`,
+            docPath: "guide.md",
+            blockIndex: index,
+            command,
+            originalCommand: command,
+            effectiveCommand: command,
+            hasStoredEdit: false,
+            request,
+          };
+        }),
+      },
+    ],
+  };
+}
+
+test("OpenAPI export builds a single doc with paths, servers, and component schemas", () => {
+  const command =
+    "curl -X POST https://api.example.com/users -H 'Content-Type: application/json' -d '{\"name\":\"Ada\"}' --doccurl-request-schema '{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}' --doccurl-response-schema '{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}' --doccurl-field-descriptions '{\"name\":\"The user display name\",\"id\":\"Server-assigned identifier\"}'";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  assert.equal(spec.openapi, "3.1.0");
+  assert.equal(spec.info.title, "DocCurl Export");
+  assert.deepEqual(spec.servers, [{ url: "https://api.example.com" }]);
+  assert.equal(Boolean(spec.paths["/users"]), true);
+  assert.equal(Boolean(spec.paths["/users"].post), true);
+  const post = spec.paths["/users"].post;
+  assert.equal(post.summary, "POST https://api.example.com/users");
+  assert.match(post.description, /Field descriptions/);
+  assert.match(post.description, /The user display name/);
+  assert.equal(Boolean(post.requestBody), true);
+  assert.equal(Boolean(post.requestBody.content["application/json"]), true);
+  assert.equal(Boolean(post.requestBody.content["application/json"].schema.$ref), true);
+  assert.equal(Boolean(post.responses["200"].content["application/json"].schema.$ref), true);
+
+  const componentNames = Object.keys(spec.components.schemas);
+  assert.equal(componentNames.length, 2);
+  const requestSchema = spec.components.schemas[componentNames[0]];
+  assert.equal(requestSchema.properties.name.description, "The user display name");
+  const responseSchema = spec.components.schemas[componentNames[1]];
+  assert.equal(responseSchema.properties.id.description, "Server-assigned identifier");
+});
+
+test("OpenAPI export preserves example body when no request schema is attached", () => {
+  const command = "curl -X POST https://api.example.com/echo -d '{\"a\":1}'";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  const post = spec.paths["/echo"].post;
+  assert.deepEqual(post.requestBody.content["text/plain"].example, { a: 1 });
+  assert.equal(post.responses["200"].content["text/plain"].schema.type, "string");
+});
+
+test("OpenAPI export derives path parameters from numeric/uuid segments", () => {
+  const command = "curl https://api.example.com/users/42";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  assert.equal(Boolean(spec.paths["/users/{var1}"]), true);
+  const getOp = spec.paths["/users/{var1}"].get;
+  assert.equal(getOp.parameters.length, 1);
+  assert.equal(getOp.parameters[0].name, "var1");
+  assert.equal(getOp.parameters[0].in, "path");
+});
+
+test("OpenAPI export merges operations with same path and method", () => {
+  const spec = buildOpenApiSpec(
+    buildModelFromCommands([
+      "curl https://api.example.com/users",
+      "curl https://api.example.com/users",
+    ]),
+  );
+  const getOp = spec.paths["/users"].get;
+  assert.equal(getOp.summary, "GET https://api.example.com/users / GET https://api.example.com/users");
+});
+
+test("OpenAPI export omits description when no schemas or field descriptions", () => {
+  const command = "curl https://api.example.com/health";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  const op = spec.paths["/health"].get;
+  assert.equal(op.description, undefined);
+  assert.equal(Object.keys(spec.components.schemas).length, 0);
+});
+
+test("OpenAPI export exposes query and header parameters", () => {
+  const command =
+    "curl 'https://api.example.com/search?q=hello' -H 'Accept: application/json'";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  const op = spec.paths["/search"].get;
+  const queryParam = op.parameters.find((p) => p.in === "query");
+  const headerParam = op.parameters.find((p) => p.in === "header");
+  assert.equal(queryParam.name, "q");
+  assert.equal(queryParam.example, "hello");
+  assert.equal(headerParam.name, "Accept");
+  assert.equal(headerParam.example, "application/json");
+});
+
+test("OpenAPI export supports multipart form data", () => {
+  const command = "curl -F 'file=@/tmp/x.png' -F 'note=hello' https://api.example.com/upload";
+  const spec = buildOpenApiSpec(buildModelFromCommands([command]));
+  const post = spec.paths["/upload"].post;
+  assert.equal(Boolean(post.requestBody.content["multipart/form-data"]), true);
+});
+

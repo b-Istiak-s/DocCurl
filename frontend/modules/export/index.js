@@ -2,10 +2,12 @@ import { buildExportCollectionModel } from "./collection-model.js";
 import { buildMarkdownExportArchive } from "./markdown/index.js";
 import { downloadBinaryFile, downloadJsonFile } from "./download.js";
 import { formatInsomniaExport } from "./formatters/insomnia.js";
+import { formatOpenApiExport } from "./formatters/openapi.js";
 import { formatPostmanExport } from "./formatters/postman.js";
 
 const EXPORT_OPTIONS = [
   { format: "insomnia", label: "Insomnia", kind: "json" },
+  { format: "openapi", label: "OpenAPI 3.1", kind: "json" },
   { format: "postman", label: "Postman", kind: "json" },
   { format: "markdown", label: "Markdown", kind: "binary", mimeType: "application/zip" },
 ];
@@ -13,6 +15,9 @@ const EXPORT_OPTIONS = [
 function formatExportPayload(format, model) {
   if (format === "insomnia") {
     return formatInsomniaExport(model);
+  }
+  if (format === "openapi") {
+    return formatOpenApiExport(model);
   }
   if (format === "postman") {
     return formatPostmanExport(model);
@@ -26,6 +31,9 @@ function formatExportPayload(format, model) {
 function createExportFilename(option) {
   if (option.format === "markdown") {
     return "doccurl-export-markdown.zip";
+  }
+  if (option.format === "openapi") {
+    return "doccurl-export-openapi.json";
   }
   return `doccurl-export-${option.format}.json`;
 }
