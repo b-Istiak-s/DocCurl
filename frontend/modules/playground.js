@@ -1,4 +1,5 @@
 import { replacePlaceholders } from "./env.js";
+import { createSchemaSystem } from "./schema.js";
 
 const STORAGE_KEYS = {
   curlEdits: "doccurl.curlEdits.v1",
@@ -94,9 +95,51 @@ function persistStoredCurlEdits(
   );
 }
 
+// Strip --doccurl-*-schema flags and their values from a curl command before
+// deriving the stable block ID. This keeps the block ID stable when an author
+// toggles schema presence on a curl block, so localStorage-stored edits aren't
+// wiped. Schemas don't affect the executable command, so they shouldn't
+// change identity.
+const DOCCURL_SCHEMA_FLAG_NAMES = new Set([
+  "--doccurl-request-schema",
+  "--doccurl-response-schema",
+  "--doccurl-field-descriptions",
+]);
+
+export function stripDocCurlSchemaFlags(command) {
+  if (typeof command !== "string" || command.length === 0) return "";
+  let tokens;
+  try {
+    tokens = tokenizeShell(command);
+  } catch {
+    return command;
+  }
+  const filtered = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    if (DOCCURL_SCHEMA_FLAG_NAMES.has(tok)) {
+      // Skip the next token (the value) if it exists.
+      if (i + 1 < tokens.length && !DOCCURL_SCHEMA_FLAG_NAMES.has(tokens[i + 1])) {
+        i += 1;
+      }
+      continue;
+    }
+    // Skip --doccurl-*-schema=value forms.
+    if (
+      /^--doccurl-(?:request-schema|response-schema|field-descriptions)=/.test(tok)
+    ) {
+      continue;
+    }
+    filtered.push(tok);
+  }
+  return filtered.join(" ");
+}
+
 export function createStableCurlBlockId(docPath, blockIndex, originalCommand) {
   const normalizedCommand =
-    formatCurlCommand(originalCommand) || String(originalCommand || "").trim();
+    stripDocCurlSchemaFlags(
+      formatCurlCommand(originalCommand) || String(originalCommand || "").trim(),
+    );
   return `curl-${blockIndex}-${hashString(`${docPath}\n${normalizedCommand}`)}`;
 }
 
@@ -850,6 +893,23 @@ function setResponseMetadata(state, metadata) {
   hideResponseMetaToast(state);
 }
 
+function setSchemaState(state, schemaSystem, { schemas, responseFields }) {
+  state.lastSchemas = schemas || null;
+  state.lastResponseFields = responseFields || null;
+  const hasAnySchema = Boolean(
+    state.lastSchemas &&
+      (state.lastSchemas.request ||
+        state.lastSchemas.response ||
+        state.lastSchemas.fieldDescriptions),
+  );
+  if (state.schemaButton) {
+    state.schemaButton.hidden = !hasAnySchema;
+  }
+  if (!hasAnySchema) {
+    schemaSystem.close();
+  }
+}
+
 function renderResponseOutput(outputElement, rawText, isError = false) {
   const output = String(rawText || "").trim();
   if (!output) {
@@ -921,6 +981,7 @@ export function createPlaygroundSystem({
   let fullscreenState = null;
   let currentDocPath = "";
   const bodyElement = documentRef?.body || globalThis.document?.body || null;
+  const schemaSystem = createSchemaSystem({ documentRef, windowRef });
 
   function persistEditorValue(state) {
     saveStoredCurlEdit(
@@ -944,6 +1005,7 @@ export function createPlaygroundSystem({
     syncCurlOverlayScroll(state);
     syncUploadUI(state);
     setResponseMetadata(state, null);
+    setSchemaState(state, schemaSystem, { schemas: null, responseFields: null });
     renderEmpty(state.outputElement);
   }
 
@@ -1206,6 +1268,10 @@ export function createPlaygroundSystem({
       if (response.ok && data.success) {
         renderResponseOutput(state.outputElement, data.output);
         setResponseMetadata(state, data.metadata);
+        setSchemaState(state, schemaSystem, {
+          schemas: data.schemas || null,
+          responseFields: data.responseFields || null,
+        });
         return;
       }
 
@@ -1244,6 +1310,7 @@ export function createPlaygroundSystem({
   async function runSoccliCommand(requestOptions, state, runController) {
     renderLoading(state.outputElement);
     setResponseMetadata(state, null);
+    setSchemaState(state, schemaSystem, { schemas: null, responseFields: null });
     const { urlOverride, ...fetchOptions } = requestOptions;
     try {
       const response = await apiFetch(
@@ -1400,6 +1467,7 @@ export function createPlaygroundSystem({
           <div class="outputEmpty">Run a command to see the response</div>
         </div>
         <div class="panelActions">
+          <button type="button" class="schemaBtn" hidden>Schema</button>
           <button type="button" class="fullscreenBtn">Fullscreen</button>
         </div>
       </section>
@@ -1422,6 +1490,7 @@ export function createPlaygroundSystem({
     const uploadRunButton = playground.querySelector(".uploadRunBtn");
     const runButton = playground.querySelector(".runBtn");
     const fullscreenButton = playground.querySelector(".fullscreenBtn");
+    const schemaButton = playground.querySelector(".schemaBtn");
     const storedValue = getStoredCurlEdit(docPath, blockId, localStorageRef);
     editorElement.value = storedValue || originalTemplate;
 
@@ -1446,6 +1515,7 @@ export function createPlaygroundSystem({
       uploadRunButton,
       runButton,
       fullscreenButton,
+      schemaButton,
       originalTemplate,
       commandKind,
       multipartMetadata: parseCurlMultipartMetadata(editorElement.value || ""),
@@ -1455,6 +1525,8 @@ export function createPlaygroundSystem({
       responseMetadata: null,
       responseMetaTimeoutId: null,
       activeRunController: null,
+      lastSchemas: null,
+      lastResponseFields: null,
       documentRef,
       windowRef,
     };
@@ -1467,6 +1539,7 @@ export function createPlaygroundSystem({
       uploadHideButton.hidden = true;
       responseMetaButton.hidden = true;
       responseMetaToast.hidden = true;
+      schemaButton.hidden = true;
     }
 
     syncCurlOverlay(state, { highlight: true });
@@ -1529,6 +1602,18 @@ export function createPlaygroundSystem({
 
     responseMetaButton.addEventListener("click", () => {
       showResponseMetaToast(state);
+    });
+
+    schemaButton.addEventListener("click", () => {
+      schemaSystem.open({
+        requestSchema: state.lastSchemas?.request || null,
+        responseSchema: state.lastSchemas?.response || null,
+        fieldDescriptions: state.lastSchemas?.fieldDescriptions || null,
+        responseFields: state.lastResponseFields,
+        responseLabel: state.responseMetadata?.statusCode
+          ? `Status ${state.responseMetadata.statusCode}`
+          : "Last run",
+      });
     });
 
     return playground;
